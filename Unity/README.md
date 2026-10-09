@@ -49,7 +49,7 @@ time you import that folder, and survive exporting again from Unreal.
 **Guesses** compare names without case, spaces or a trailing "Texture" / "Map", so
 `Base Color Texture` is recognised as a base color. Channel-packed masks are recognised from a
 list in the name, such as `ORMA(AO,Rough,Mat,Emis)`, or from an upper-case suffix such as
-`_ORM`, `_ARM` or `_RMA`. Emission maps and engine placeholder textures are never guessed.
+`_ORM`, `_ARM` or `_RMA`. A parameter named like `Color_Mask`, `Tint Mask` or `Paint Mask` is guessed as a color mask, even when it holds a placeholder texture such as `T_Gray`. Emission maps and engine placeholder textures are otherwise never guessed.
 
 **Mapping tables** are optional. Create one with **Assets > Create > Portage > Mapping Table**
 when you want to reuse the same rules across many export folders or share them with a team.
@@ -70,6 +70,7 @@ occlusion to all ambient light, which would turn those areas black in shadow.
 | Emission | Emission map |
 | Mask | Repacked into the metallic / smoothness / occlusion texture. Set what each of R, G, B and A contains; roughness is inverted into smoothness. |
 | Ignore | Not used |
+| ColorMask | Limits the base color tint to the white areas of this texture. The tint is baked into a copy of the base color texture, `<Material>_BaseColor.png`; with a uniform mask it only scales `_BaseColor`. Needs a base color texture and a vector parameter mapped to `_BaseColor`. |
 
 ## What you get
 

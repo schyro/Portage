@@ -22,8 +22,14 @@ namespace Portage
         /// </summary>
         Mask,
 
-        /// <summary>The parameter is deliberately unused. Always the last member; assets serialize the ints.</summary>
+        /// <summary>The parameter is deliberately unused. Assets serialize the ints, so never reorder members.</summary>
         Ignore,
+
+        /// <summary>
+        /// Limits the base colour tint to the white areas of this texture. URP Lit has no tint mask, so the
+        /// tint is baked into a copy of the base colour texture. Always the last member.
+        /// </summary>
+        ColorMask,
     }
 
     /// <summary>What a single channel of a <see cref="TextureUsage.Mask"/> texture contains.</summary>

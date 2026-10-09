@@ -18,6 +18,7 @@ namespace Portage
         static readonly TextureUsage[] UsageOptions =
         {
             TextureUsage.BaseColor, TextureUsage.Normal, TextureUsage.Emission, TextureUsage.Mask, TextureUsage.Ignore,
+            TextureUsage.ColorMask,
         };
 
         static readonly string[] VectorProperties = { "_BaseColor", "_EmissionColor" };

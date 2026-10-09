@@ -54,7 +54,7 @@ guess.
 | Field | Type | Description |
 | --- | --- | --- |
 | `parameter` | string | Unreal parameter name, exactly as in the manifest. |
-| `usage` | string | `BaseColor`, `Normal`, `Emission`, `Mask` or `Ignore`. |
+| `usage` | string | `BaseColor`, `Normal`, `Emission`, `Mask`, `Ignore` or `ColorMask`. `ColorMask` limits the base colour tint to the white areas of the texture. |
 | `red`, `green`, `blue`, `alpha` | string | Content of each channel when `usage` is `Mask`: `None`, `Metallic`, `Roughness`, `Smoothness` or `Occlusion`. |
 
 ### scalars

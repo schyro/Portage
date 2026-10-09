@@ -74,7 +74,7 @@ namespace Portage.Tests
 
             PortageMappingGuesser.Result result = PortageMappingGuesser.Guess(entry, manifest);
 
-            Assert.AreEqual(3, GuessedTextures(result).Length);
+            Assert.AreEqual(4, GuessedTextures(result).Length);
             Assert.AreEqual(TextureUsage.BaseColor, result.FindTexture("Base Color Texture").Usage);
             Assert.AreEqual(TextureUsage.Normal, result.FindTexture("Normal Texture").Usage);
 
@@ -85,11 +85,45 @@ namespace Portage.Tests
             Assert.AreEqual(MaskChannel.Metallic, mask.Blue);
             Assert.AreEqual(MaskChannel.None, mask.Alpha);
 
+            // A colour mask is guessed even though its texture is a placeholder.
+            Assert.AreEqual(TextureUsage.ColorMask, result.FindTexture("Color_Mask").Usage);
+
             Assert.AreEqual(1, result.Scalars.Count);
             Assert.AreEqual("_BumpScale", result.FindScalar("Normal Strength").Property);
 
             Assert.AreEqual(1, result.Vectors.Count);
             Assert.AreEqual("_BaseColor", result.FindVector("Base Color Multiplier").Property);
+        }
+
+        [Test]
+        public void ColorMask_IsGuessedForRealTexturesAndOnlyOncePerMaterial()
+        {
+            PortageManifest manifest = NewManifest(out PortageManifest.MaterialEntry entry);
+            AddTexture(manifest, entry, "Tint Mask Texture", Tex("T_Mask", false, "Masks"));
+            AddTexture(manifest, entry, "Paint_Mask", Tex("T_Mask2", false, "Masks"));
+
+            PortageMappingGuesser.Result result = PortageMappingGuesser.Guess(entry, manifest);
+
+            Assert.AreEqual(TextureUsage.ColorMask, result.FindTexture("Tint Mask Texture").Usage);
+            Assert.IsNull(result.FindTexture("Paint_Mask"));
+        }
+
+        [Test]
+        public void ColorMask_SavedChoiceRoundTripsAndBeatsTheGuess()
+        {
+            PortageManifest manifest = NewManifest(out PortageManifest.MaterialEntry entry);
+            AddTexture(manifest, entry, "Color_Mask", Tex("T_Gray", false, "Default"));
+            var file = new PortageMappingFile();
+            file.SetTexture(BaseMaterial, "Color_Mask", TextureUsage.ColorMask);
+
+            Assert.AreEqual("ColorMask", file.FindTexture(BaseMaterial, "Color_Mask").usage);
+            TextureDecision saved = PortageMappingResolver.Resolve(entry, manifest, null, file).FindTexture("Color_Mask");
+            Assert.AreEqual(MappingSource.Saved, saved.Source);
+            Assert.AreEqual(TextureUsage.ColorMask, saved.Usage);
+
+            TextureDecision guessed = PortageMappingResolver.Resolve(entry, manifest, null, null).FindTexture("Color_Mask");
+            Assert.AreEqual(MappingSource.Guess, guessed.Source);
+            Assert.AreEqual(TextureUsage.ColorMask, guessed.Usage);
         }
 
         [Test]

@@ -75,7 +75,7 @@ namespace Portage
     {
         sealed class Taken
         {
-            public bool BaseColor, Normal, Metallic, Smoothness, Occlusion;
+            public bool BaseColor, Normal, ColorMask, Metallic, Smoothness, Occlusion;
             public readonly HashSet<string> ScalarProperties = new HashSet<string>();
             public readonly HashSet<string> VectorProperties = new HashSet<string>();
         }
@@ -249,6 +249,10 @@ namespace Portage
                     if (taken.Normal)
                         return;
                     break;
+                case TextureUsage.ColorMask:
+                    if (taken.ColorMask)
+                        return;
+                    break;
                 case TextureUsage.Mask:
                     decision.Red = Available(guess.Red, taken);
                     decision.Green = Available(guess.Green, taken, decision.Red);
@@ -308,6 +312,9 @@ namespace Portage
                     break;
                 case TextureUsage.Normal:
                     taken.Normal = true;
+                    break;
+                case TextureUsage.ColorMask:
+                    taken.ColorMask = true;
                     break;
                 case TextureUsage.Mask:
                     foreach (MaskChannel channel in new[] { decision.Red, decision.Green, decision.Blue, decision.Alpha })

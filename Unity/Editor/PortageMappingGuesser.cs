@@ -30,6 +30,11 @@ namespace Portage
             "basecolor", "albedo", "diffuse", "color", "basecolour", "diffusecolor", "albedocolor",
         };
 
+        static readonly HashSet<string> ColorMaskNames = new HashSet<string>
+        {
+            "colormask", "colourmask", "tintmask", "paintmask",
+        };
+
         static readonly HashSet<string> NormalNames = new HashSet<string> { "normal", "normals", "nrm", "basenormal" };
 
         static readonly HashSet<string> RoughnessNames = new HashSet<string> { "roughness" };
@@ -136,13 +141,30 @@ namespace Portage
             ISet<string> excluded, Result result)
         {
             var candidates = new List<Candidate>();
+            bool colorMaskFound = false;
             foreach (PortageManifest.TextureParameter parameter in entry.textureParameters)
             {
                 if (excluded != null && excluded.Contains(parameter.name))
                     continue;
 
                 PortageManifest.TextureEntry texture = manifest.FindTexture(parameter.texture);
-                if (texture == null || IsPlaceholder(texture))
+                if (texture == null)
+                    continue;
+
+                // A colour mask is the one usage a placeholder texture is allowed for: a uniform grey mask
+                // legitimately means "apply the tint partially". At most one per material.
+                if (ColorMaskNames.Contains(NormalizeName(parameter.name)))
+                {
+                    if (!colorMaskFound)
+                    {
+                        colorMaskFound = true;
+                        result.Textures.Add(new TextureGuess { Parameter = parameter.name, Usage = TextureUsage.ColorMask });
+                    }
+
+                    continue;
+                }
+
+                if (IsPlaceholder(texture))
                     continue;
 
                 candidates.Add(new Candidate

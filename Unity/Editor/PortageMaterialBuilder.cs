@@ -99,7 +99,11 @@ namespace Portage
 
             var recipe = new PortageTextureProcessor.MaskRecipe();
             var maskNames = new List<string>();
-            Texture2D baseMap = null, normalMap = null, emissionMap = null;
+            Texture2D normalMap = null, emissionMap = null;
+            // Base colour and colour mask are imported after the loop: the base texture is not imported
+            // at all when a tinted copy replaces it.
+            PortageManifest.TextureEntry baseTexture = null, colorMaskTexture = null;
+            string colorMaskParameter = null;
             bool anyResolved = false;
 
             for (int i = 0; i < entry.textureParameters.Count; i++)
@@ -142,13 +146,23 @@ namespace Portage
                 switch (decision.Usage)
                 {
                     case TextureUsage.BaseColor:
-                        if (baseMap != null)
+                        if (baseTexture != null)
                         {
                             ReportDuplicate(entry, parameter.name, decision.Usage);
                             break;
                         }
 
-                        baseMap = ImportAndLoad(texture);
+                        baseTexture = texture;
+                        break;
+                    case TextureUsage.ColorMask:
+                        if (colorMaskTexture != null)
+                        {
+                            ReportDuplicate(entry, parameter.name, decision.Usage);
+                            break;
+                        }
+
+                        colorMaskTexture = texture;
+                        colorMaskParameter = parameter.name;
                         break;
                     case TextureUsage.Normal:
                         if (normalMap != null)
@@ -187,6 +201,50 @@ namespace Portage
                     "(no saved choice, mapping table rule or guess), so the material has no textures. Review the " +
                     "parameter mapping in the import window or assign a mapping table with rules for this asset pack.");
             }
+
+            // The vector parameter that ends up in _BaseColor; like the vector loop below, the last one wins.
+            int tintIndex = -1;
+            for (int i = 0; i < entry.vectorParameters.Count; i++)
+            {
+                VectorDecision decision = resolution.Vectors[i];
+                if (decision.IsMapped && decision.Property == "_BaseColor")
+                    tintIndex = i;
+            }
+
+            Texture2D baseMap = null;
+            Color? baseColorOverride = null;
+            if (colorMaskTexture != null && (baseTexture == null || tintIndex < 0))
+            {
+                _report.Info("colorMask.unused", entry.id,
+                    $"{entry.name}: colour mask '{colorMaskParameter}' has no effect because the material has no " +
+                    (baseTexture == null ? "base colour texture" : "base colour tint (a vector parameter mapped to _BaseColor)") +
+                    " to limit.");
+            }
+            else if (colorMaskTexture != null)
+            {
+                Color tint = entry.vectorParameters[tintIndex].ToColor();
+                PortageTextureProcessor.ColorMaskImage mask = _textures.LoadColorMask(colorMaskTexture, entry.name);
+                if (mask != null && mask.IsUniform)
+                {
+                    // A uniform mask needs no baking: the tint is scaled by the mask value instead.
+                    baseColorOverride = Color.Lerp(Color.white, tint, mask.UniformValue);
+                }
+                else if (mask != null)
+                {
+                    string bakedPath = _textures.BakeTintedBaseColor(entry.name, baseTexture, colorMaskTexture, mask, tint);
+                    baseMap = bakedPath != null ? AssetDatabase.LoadAssetAtPath<Texture2D>(bakedPath) : null;
+                    if (baseMap != null)
+                    {
+                        baseColorOverride = Color.white;
+                        _report.Info("colorMask.baked", entry.id,
+                            $"{entry.name}: the base colour tint was limited to the white areas of colour mask " +
+                            $"'{colorMaskParameter}' and baked into {bakedPath}.");
+                    }
+                }
+            }
+
+            if (baseMap == null && baseTexture != null)
+                baseMap = ImportAndLoad(baseTexture);
 
             // Scalars are collected first because the mask packing depends on them.
             var scalars = new Dictionary<string, float>();
@@ -277,8 +335,8 @@ namespace Portage
                 if (decision.Source == MappingSource.Guess)
                     ReportGuessed(entry, "vector", parameter.name, decision.Property);
 
-                SetColor(entry, material, decision.Property,
-                    ToPropertySpace(material, decision.Property, parameter.ToColor()));
+                Color value = i == tintIndex && baseColorOverride.HasValue ? baseColorOverride.Value : parameter.ToColor();
+                SetColor(entry, material, decision.Property, ToPropertySpace(material, decision.Property, value));
             }
 
             if (material.HasProperty("_EmissionColor") && material.GetColor("_EmissionColor").maxColorComponent > 0f)
