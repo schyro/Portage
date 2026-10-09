@@ -1,0 +1,32 @@
+# Export output produced by the Unreal exporter. Never commit exported assets.
+/[Ee]xport/
+/[Ee]xports/
+PortageExport/
+
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+
+# Unity project folders (in case a project is opened from the repo root)
+/[Ll]ibrary/
+/[Tt]emp/
+/[Oo]bj/
+/[Ll]ogs/
+/[Uu]ser[Ss]ettings/
+*.csproj
+*.sln
+*.slnx
+
+# Unreal project folders (in case a project is opened from the repo root)
+/Binaries/
+/DerivedDataCache/
+/Intermediate/
+/Saved/
+
+# IDE / OS
+.vs/
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
