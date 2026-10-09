@@ -76,7 +76,7 @@ Each slot:
 | Field | Type | Description |
 | --- | --- | --- |
 | `index` | int | Slot index in Unreal. |
-| `name` | string | Material slot name. The importer matches FBX materials by this name first, by `index` as fallback. |
+| `name` | string | Material slot name. The importer matches FBX materials by this name first, then by the material's `name`, then by `index`. Which name Unreal writes into the FBX is not verified yet. |
 | `material` | string | `id` of an entry in `materials`, or empty if the slot has no material. |
 
 The FBX is exported with Unreal's units (centimetres) and axes untouched. Scale and axis
@@ -231,7 +231,8 @@ Codes defined in version 1:
 
 - That Unreal's FBX exporter can leave units and axes untouched in a way Unity's import settings
   convert to scale 1 and rotation 0. If not, the exporter will have to record the applied
-  conversion in the manifest.
+  conversion in the manifest. One data point so far: a Blender FBX exported without baking its
+  axis conversion imported with a 90 degree rotation on X despite *Bake Axis Conversion*.
 - That every field above can be read through the Unreal Python API (blend mode, shading model,
   effective parameter values of an instance, compression setting, *Flip Green Channel*).
 - That PNG is sufficient for all exported textures; HDR and 16-bit sources may need another

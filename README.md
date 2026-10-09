@@ -3,8 +3,8 @@
 Transfers assets from an Unreal Engine project to Unity: static meshes, textures and material
 instances first, animations and level layouts later.
 
-> **Status: pre-alpha.** The repository currently contains the project layout and the draft
-> manifest format only. Neither the exporter nor the importer is implemented yet.
+> **Status: pre-alpha.** The Unity importer works against a self-made test export. The Unreal
+> exporter is not implemented yet, so the pipeline cannot be used end to end.
 
 ## How it works
 
@@ -38,7 +38,7 @@ Only projects opened in the Unreal Editor are supported. Cooked `.pak` content i
 
 ## Installing the Unity package
 
-Not usable yet. Once the importer exists it will install through the Package Manager with:
+In the Package Manager choose *Add package from git URL* and enter:
 
 ```
 https://github.com/schyro/Portage.git?path=/Unity

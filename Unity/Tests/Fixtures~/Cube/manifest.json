@@ -1,0 +1,128 @@
+{
+  "formatVersion": 1,
+  "generator": {
+    "name": "Portage test fixture",
+    "version": "0.1.0",
+    "engineVersion": "",
+    "exportedAt": "2026-10-09T00:00:00Z"
+  },
+  "meshes": [
+    {
+      "id": "/Game/Cube/SM_Cube.SM_Cube",
+      "name": "SM_Cube",
+      "file": "Meshes/SM_Cube.fbx",
+      "slots": [
+        {
+          "index": 0,
+          "name": "MI_Cube",
+          "material": "/Game/Cube/MI_Cube.MI_Cube"
+        },
+        {
+          "index": 1,
+          "name": "M_Embedded",
+          "material": "/Game/Cube/M_Embedded.M_Embedded"
+        }
+      ]
+    }
+  ],
+  "materials": [
+    {
+      "id": "/Game/Cube/MI_Cube.MI_Cube",
+      "name": "MI_Cube",
+      "kind": "instance",
+      "parent": "/Game/Cube/M_Prop.M_Prop",
+      "baseMaterial": "/Game/Cube/M_Prop.M_Prop",
+      "blendMode": "opaque",
+      "shadingModel": "defaultLit",
+      "twoSided": false,
+      "opacityMaskClipValue": 0.3333,
+      "scalarParameters": [
+        {
+          "name": "WetnessAmount",
+          "value": 0.25
+        }
+      ],
+      "vectorParameters": [
+        {
+          "name": "Tint",
+          "value": [
+            1.0,
+            0.9,
+            0.8,
+            1.0
+          ]
+        }
+      ],
+      "textureParameters": [
+        {
+          "name": "BaseColor",
+          "texture": "/Game/Cube/T_Cube_D.T_Cube_D"
+        },
+        {
+          "name": "Normal",
+          "texture": "/Game/Cube/T_Cube_N.T_Cube_N"
+        },
+        {
+          "name": "ORM",
+          "texture": "/Game/Cube/T_Cube_ORM.T_Cube_ORM"
+        }
+      ],
+      "convertible": true
+    },
+    {
+      "id": "/Game/Cube/M_Embedded.M_Embedded",
+      "name": "M_Embedded",
+      "kind": "material",
+      "parent": "",
+      "baseMaterial": "/Game/Cube/M_Embedded.M_Embedded",
+      "blendMode": "opaque",
+      "shadingModel": "defaultLit",
+      "twoSided": false,
+      "opacityMaskClipValue": 0.3333,
+      "scalarParameters": [],
+      "vectorParameters": [],
+      "textureParameters": [],
+      "convertible": false
+    }
+  ],
+  "textures": [
+    {
+      "id": "/Game/Cube/T_Cube_D.T_Cube_D",
+      "name": "T_Cube_D",
+      "file": "Textures/T_Cube_D.png",
+      "width": 64,
+      "height": 64,
+      "srgb": true,
+      "compression": "Default",
+      "flipGreenChannel": false
+    },
+    {
+      "id": "/Game/Cube/T_Cube_N.T_Cube_N",
+      "name": "T_Cube_N",
+      "file": "Textures/T_Cube_N.png",
+      "width": 64,
+      "height": 64,
+      "srgb": false,
+      "compression": "Normalmap",
+      "flipGreenChannel": false
+    },
+    {
+      "id": "/Game/Cube/T_Cube_ORM.T_Cube_ORM",
+      "name": "T_Cube_ORM",
+      "file": "Textures/T_Cube_ORM.png",
+      "width": 64,
+      "height": 64,
+      "srgb": false,
+      "compression": "Masks",
+      "flipGreenChannel": false
+    }
+  ],
+  "issues": [
+    {
+      "severity": "warning",
+      "code": "material.noParameters",
+      "asset": "/Game/Cube/M_Embedded.M_Embedded",
+      "message": "M_Embedded exposes no parameters and was not converted."
+    }
+  ]
+}
