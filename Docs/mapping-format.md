@@ -35,6 +35,7 @@ rule maps a normal map, no second normal map is guessed.
 | --- | --- | --- |
 | `version` | int | `1` |
 | `materials` | array | One entry per base material. |
+| `applyOcclusion` | bool | Assign the occlusion channel of mask textures to the generated materials. `false` when missing. Unreal mostly ignores material ambient occlusion under dynamic lighting, so applying it in URP can darken a model that looks fine in Unreal. |
 
 ### materials
 
@@ -76,6 +77,7 @@ guess.
 ```json
 {
   "version": 1,
+  "applyOcclusion": false,
   "materials": [
     {
       "baseMaterial": "/Game/Materials/M_Prop.M_Prop",

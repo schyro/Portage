@@ -240,6 +240,27 @@ namespace Portage
                 style = { color = new Color(0.6f, 0.6f, 0.6f), whiteSpace = WhiteSpace.Normal },
             });
 
+            var occlusionToggle = new Toggle("Apply ambient occlusion")
+            {
+                value = _mapping.applyOcclusion,
+                tooltip = "Assign the occlusion channel of mask textures to the materials. Off by default: Unreal " +
+                          "mostly ignores material ambient occlusion under dynamic lighting, so applying it can make " +
+                          "a model darker in Unity than it is in Unreal.",
+            };
+            occlusionToggle.RegisterValueChangedCallback(changed =>
+            {
+                _mapping.applyOcclusion = changed.newValue;
+                try
+                {
+                    _mapping.Save(_exportField.value);
+                }
+                catch (Exception e)
+                {
+                    Debug.LogWarning($"[Portage] Could not save {PortageMappingFile.FileName}: {e.Message}");
+                }
+            });
+            _mappingRoot.Add(occlusionToggle);
+
             var groups = new List<Group>();
             foreach (PortageManifest.MaterialEntry entry in _manifest.materials)
             {
@@ -608,6 +629,7 @@ namespace Portage
         {
             PortageImportReport report = PortageImporter.Import(
                 _exportField.value, _targetField.value, _tableField.value as PortageMappingTable);
+            report.LogProblemsToConsole();
             ShowReport(report);
         }
 

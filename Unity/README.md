@@ -54,6 +54,13 @@ list in the name, such as `ORMA(AO,Rough,Mat,Emis)`, or from an upper-case suffi
 **Mapping tables** are optional. Create one with **Assets > Create > Portage > Mapping Table**
 when you want to reuse the same rules across many export folders or share them with a team.
 
+### Ambient occlusion
+
+The occlusion channel of a mask is not used unless you tick **Apply ambient occlusion** in the
+import window. Unreal mostly ignores material ambient occlusion under dynamic lighting, so asset
+packs often ship occlusion channels with large black areas that are invisible there. URP applies
+occlusion to all ambient light, which would turn those areas black in shadow.
+
 ### Texture usages
 
 | Usage | Goes to |
@@ -126,7 +133,7 @@ What follows from this:
 
 - Metallic, smoothness and occlusion use different channels, so one repacked texture
   (R = metallic, G = occlusion, A = smoothness) serves both `_MetallicGlossMap` and
-  `_OcclusionMap`.
+  `_OcclusionMap`. The occlusion slot is only assigned when ambient occlusion is turned on.
 - With a metallic map assigned, the map's alpha is multiplied by `_Smoothness` and `_Metallic`
   is ignored. Generated materials therefore set `_Smoothness` to 1.
 - FBX materials are matched to manifest slots by material name, which is what Unreal writes

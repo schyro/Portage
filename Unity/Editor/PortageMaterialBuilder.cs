@@ -226,12 +226,14 @@ namespace Portage
                     : (material.HasProperty("_Metallic") ? material.GetFloat("_Metallic") : 0f);
                 byte metallicFill = (byte)Mathf.RoundToInt(Mathf.Clamp01(metallicScalar) * 255f);
 
-                string maskPath = _textures.BuildMask(recipe, string.Join("_", maskNames), metallicFill);
+                bool applyOcclusion = _mapping != null && _mapping.applyOcclusion;
+                string maskPath = _textures.BuildMask(recipe, string.Join("_", maskNames), metallicFill, applyOcclusion);
                 var mask = maskPath != null ? AssetDatabase.LoadAssetAtPath<Texture2D>(maskPath) : null;
                 if (mask != null)
                 {
                     SetTexture(entry, material, "_MetallicGlossMap", mask);
-                    if (recipe.Occlusion != null)
+                    // The occlusion channel is always packed, but only assigned when asked for.
+                    if (recipe.Occlusion != null && applyOcclusion)
                         SetTexture(entry, material, "_OcclusionMap", mask);
 
                     // The shader multiplies the map alpha by _Smoothness, so it must be 1 when the

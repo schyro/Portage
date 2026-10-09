@@ -21,6 +21,13 @@ namespace Portage
         public int version = SupportedFormatVersion;
         public List<MaterialChoices> materials = new List<MaterialChoices>();
 
+        /// <summary>
+        /// Assign the occlusion channel of mask textures to the generated materials. Off by default:
+        /// Unreal mostly ignores material ambient occlusion under dynamic lighting, so applying it
+        /// in URP can darken a model that looks fine in Unreal.
+        /// </summary>
+        public bool applyOcclusion;
+
         /// <summary>Why the file on disk was ignored by <see cref="Load"/>, or empty when it was fine.</summary>
         [NonSerialized] public string LoadError = "";
 

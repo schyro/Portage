@@ -81,6 +81,21 @@ namespace Portage.Tests
         }
 
         [Test]
+        public void ApplyOcclusion_AssignsTheOcclusionMap()
+        {
+            string export = CopyBlockExport();
+            new PortageMappingFile { applyOcclusion = true }.Save(export);
+
+            PortageImportReport report = PortageImporter.Import(export, Root + "/Block", null);
+
+            Assert.AreEqual(0, report.ErrorCount);
+            var material = AssetDatabase.LoadAssetAtPath<Material>(Root + "/Block/Materials/MI_Block.mat");
+            Assert.IsNotNull(material.GetTexture("_OcclusionMap"));
+            Assert.AreEqual(material.GetTexture("_MetallicGlossMap"), material.GetTexture("_OcclusionMap"));
+            Assert.IsTrue(material.IsKeywordEnabled("_OCCLUSIONMAP"));
+        }
+
+        [Test]
         public void InvalidSidecar_IsReportedAndIgnored()
         {
             string export = CopyBlockExport();

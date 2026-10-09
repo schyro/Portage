@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using UnityEngine;
 
 namespace Portage
 {
@@ -61,6 +62,25 @@ namespace Portage
                 Asset = asset ?? "",
                 Message = message ?? "",
             });
+        }
+
+        /// <summary>
+        /// Writes every warning and error to the Unity console. Info entries are left out, because
+        /// they are numerous and need no action.
+        /// </summary>
+        public void LogProblemsToConsole()
+        {
+            foreach (Entry entry in Entries)
+            {
+                if (entry.Severity == PortageSeverity.Info)
+                    continue;
+
+                string text = $"[Portage] {entry.Message} ({entry.Code})";
+                if (entry.Severity == PortageSeverity.Error)
+                    Debug.LogError(text);
+                else
+                    Debug.LogWarning(text);
+            }
         }
 
         /// <summary>Copies a manifest issue into the report. Unknown severities become warnings.</summary>

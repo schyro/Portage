@@ -148,7 +148,7 @@ namespace Portage
         /// </summary>
         /// <param name="baseName">Name used for the file, <c>&lt;baseName&gt;_Mask.png</c>.</param>
         /// <param name="metallicFill">Value for the red channel when the recipe has no metallic source.</param>
-        public string BuildMask(MaskRecipe recipe, string baseName, byte metallicFill)
+        public string BuildMask(MaskRecipe recipe, string baseName, byte metallicFill, bool warnAboutBlackOcclusion = false)
         {
             if (recipe == null || recipe.IsEmpty)
                 return null;
@@ -170,6 +170,27 @@ namespace Portage
             }
 
             Color32[] packed = PackMask(metallic, smoothness, occlusion, metallicFill, out int width, out int height);
+
+            // Unreal mostly ignores material ambient occlusion under dynamic lighting, so packs ship
+            // occlusion channels with large black areas that nobody noticed. URP applies occlusion to
+            // all ambient light, which turns those areas black in shadow.
+            if (occlusion != null && warnAboutBlackOcclusion)
+            {
+                int black = 0;
+                foreach (Color32 pixel in packed)
+                {
+                    if (pixel.g < 13)
+                        black++;
+                }
+
+                float fraction = black / (float)packed.Length;
+                if (fraction > 0.1f)
+                {
+                    _report.Warning("mask.occlusionMostlyBlack", baseName,
+                        $"{baseName}: {fraction:P0} of the occlusion channel is black, so those areas render black in " +
+                        "shadow. If that looks wrong, turn off 'Apply ambient occlusion' in the import window.");
+                }
+            }
 
             string safeName = PortageAssetUtil.SanitizeFileName(baseName);
             string assetPath = _textureFolder + "/" + safeName + "_Mask.png";

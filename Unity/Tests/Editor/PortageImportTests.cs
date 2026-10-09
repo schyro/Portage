@@ -46,11 +46,11 @@ namespace Portage.Tests
             Assert.IsNotNull(material.GetTexture("_BaseMap"));
             Assert.IsNotNull(material.GetTexture("_BumpMap"));
             Assert.IsNotNull(material.GetTexture("_MetallicGlossMap"));
-            Assert.IsNotNull(material.GetTexture("_OcclusionMap"));
+            Assert.IsNull(material.GetTexture("_OcclusionMap"), "occlusion is off unless the mapping file asks for it");
             Assert.AreEqual(1f, material.GetFloat("_Smoothness"), 1e-5f);
             Assert.IsTrue(material.IsKeywordEnabled("_NORMALMAP"));
             Assert.IsTrue(material.IsKeywordEnabled("_METALLICSPECGLOSSMAP"));
-            Assert.IsTrue(material.IsKeywordEnabled("_OCCLUSIONMAP"));
+            Assert.IsFalse(material.IsKeywordEnabled("_OCCLUSIONMAP"));
 
             // The manifest value is linear; a non-HDR color property stores its sRGB equivalent.
             Color baseColor = material.GetColor("_BaseColor").linear;
