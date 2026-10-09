@@ -1,6 +1,6 @@
 # Portage manifest format
 
-**Format version: 1 — draft.** This version has not been produced by a real Unreal export yet.
+**Format version: 1 — draft.** Produced and consumed end to end with Unreal Engine 5.8.3 and Unity 6000.3.
 Fields may still change before the first release without a version bump.
 
 The exporter writes one `manifest.json` at the root of every export folder. The manifest is the
@@ -76,7 +76,7 @@ Each slot:
 | Field | Type | Description |
 | --- | --- | --- |
 | `index` | int | Slot index in Unreal. |
-| `name` | string | Material slot name. The importer matches FBX materials by this name first, then by the material's `name`, then by `index`. Which name Unreal writes into the FBX is not verified yet. |
+| `name` | string | Material slot name. Unreal 5.8 names FBX materials after the material asset, not the slot, so the importer matches FBX materials by the slot material's `name`, with this name and `index` as alternatives. |
 | `material` | string | `id` of an entry in `materials`, or empty if the slot has no material. |
 
 The FBX is exported with Unreal's units (centimetres) and axes untouched. Scale and axis
@@ -140,6 +140,10 @@ Codes defined in version 1:
 | `material.unsupportedShadingModel` | Shading model with no URP Lit equivalent. |
 | `texture.exportFailed` | The texture could not be written. |
 | `mesh.exportFailed` | The FBX could not be written. |
+| `material.blendModeApproximated` | Blend mode with no direct counterpart, exported as `translucent`. |
+| `texture.unsupportedType` | The texture is not a 2D texture and was not exported. |
+| `asset.unsupportedType` | An asset that is not a static mesh was passed to the exporter and skipped. |
+| `export.cancelled` | The user cancelled the export; the manifest is incomplete. |
 
 ## Example
 
@@ -227,16 +231,20 @@ Codes defined in version 1:
 }
 ```
 
-## Unverified until a real Unreal 5.8 export exists
+## Units and axes
 
-- That Unreal's FBX exporter can leave units and axes untouched in a way Unity's import settings
-  convert to scale 1 and rotation 0. If not, the exporter will have to record the applied
-  conversion in the manifest. One data point so far: a Blender FBX exported without baking its
-  axis conversion imported with a 90 degree rotation on X despite *Bake Axis Conversion*.
-- That every field above can be read through the Unreal Python API (blend mode, shading model,
-  effective parameter values of an instance, compression setting, *Flip Green Channel*).
-- That PNG is sufficient for all exported textures; HDR and 16-bit sources may need another
-  format.
+Verified with Unreal Engine 5.8.3 and Unity 6000.3.12f1: with Unity's *Bake Axis Conversion* and
+file scale enabled, an exported mesh imports with scale 1 and rotation 0, and a point at Unreal
+`(X, Y, Z)` centimetres ends up at Unity `(X, Z, -Y)` metres. Up stays up and nothing is
+mirrored, but Unreal's forward axis (+X) becomes Unity's right axis (+X), not its forward axis.
+The manifest does not record this; it is the behaviour of Unreal's FBX exporter with default
+settings.
+
+## Not verified yet
+
+- What the PNG exporter writes for HDR, 16-bit or virtual textures. Such textures may fail to
+  export or lose precision.
+- Whether a texture with *Flip Green Channel* set is exported with the flip already applied.
 
 ## Reserved for later versions
 

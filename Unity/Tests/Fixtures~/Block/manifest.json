@@ -1,0 +1,132 @@
+{
+  "formatVersion": 1,
+  "generator": {
+    "name": "Portage",
+    "version": "0.1.0",
+    "engineVersion": "5.8.3",
+    "exportedAt": "2026-10-09T21:09:51Z"
+  },
+  "meshes": [
+    {
+      "id": "/Game/PortageTest/SM_Block.SM_Block",
+      "name": "SM_Block",
+      "file": "Meshes/SM_Block.fbx",
+      "slots": [
+        {
+          "index": 0,
+          "name": "Body",
+          "material": "/Game/PortageTest/MI_Block.MI_Block"
+        },
+        {
+          "index": 1,
+          "name": "Cap",
+          "material": "/Game/PortageTest/M_Embedded.M_Embedded"
+        }
+      ]
+    }
+  ],
+  "materials": [
+    {
+      "id": "/Game/PortageTest/MI_Block.MI_Block",
+      "name": "MI_Block",
+      "kind": "instance",
+      "parent": "/Game/PortageTest/M_Prop.M_Prop",
+      "baseMaterial": "/Game/PortageTest/M_Prop.M_Prop",
+      "blendMode": "opaque",
+      "shadingModel": "defaultLit",
+      "twoSided": true,
+      "opacityMaskClipValue": 0.33329999446868896,
+      "scalarParameters": [
+        {
+          "name": "WetnessAmount",
+          "value": 0.25
+        },
+        {
+          "name": "InheritedAmount",
+          "value": 0.699999988079071
+        }
+      ],
+      "vectorParameters": [
+        {
+          "name": "Tint",
+          "value": [
+            1.0,
+            0.8999999761581421,
+            0.800000011920929,
+            1.0
+          ]
+        }
+      ],
+      "textureParameters": [
+        {
+          "name": "BaseColor",
+          "texture": "/Game/PortageTest/T_Block_D.T_Block_D"
+        },
+        {
+          "name": "Normal",
+          "texture": "/Game/PortageTest/T_Block_N.T_Block_N"
+        },
+        {
+          "name": "ORM",
+          "texture": "/Game/PortageTest/T_Block_ORM.T_Block_ORM"
+        }
+      ],
+      "convertible": true
+    },
+    {
+      "id": "/Game/PortageTest/M_Embedded.M_Embedded",
+      "name": "M_Embedded",
+      "kind": "material",
+      "parent": "",
+      "baseMaterial": "/Game/PortageTest/M_Embedded.M_Embedded",
+      "blendMode": "opaque",
+      "shadingModel": "defaultLit",
+      "twoSided": false,
+      "opacityMaskClipValue": 0.33329999446868896,
+      "scalarParameters": [],
+      "vectorParameters": [],
+      "textureParameters": [],
+      "convertible": false
+    }
+  ],
+  "textures": [
+    {
+      "id": "/Game/PortageTest/T_Block_D.T_Block_D",
+      "name": "T_Block_D",
+      "file": "Textures/T_Block_D.png",
+      "width": 64,
+      "height": 64,
+      "srgb": true,
+      "compression": "Default",
+      "flipGreenChannel": false
+    },
+    {
+      "id": "/Game/PortageTest/T_Block_N.T_Block_N",
+      "name": "T_Block_N",
+      "file": "Textures/T_Block_N.png",
+      "width": 64,
+      "height": 64,
+      "srgb": false,
+      "compression": "Normalmap",
+      "flipGreenChannel": false
+    },
+    {
+      "id": "/Game/PortageTest/T_Block_ORM.T_Block_ORM",
+      "name": "T_Block_ORM",
+      "file": "Textures/T_Block_ORM.png",
+      "width": 64,
+      "height": 64,
+      "srgb": false,
+      "compression": "Masks",
+      "flipGreenChannel": false
+    }
+  ],
+  "issues": [
+    {
+      "severity": "warning",
+      "code": "material.noParameters",
+      "asset": "/Game/PortageTest/M_Embedded.M_Embedded",
+      "message": "M_Embedded exposes no parameters and was not converted. Its textures and values are embedded in the material graph."
+    }
+  ]
+}

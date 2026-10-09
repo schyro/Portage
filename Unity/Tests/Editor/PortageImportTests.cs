@@ -96,6 +96,35 @@ namespace Portage.Tests
             Assert.AreEqual(1f, mesh.bounds.size.z, 0.01f);
         }
 
+        // Fixtures~/Block is a real Unreal 5.8.3 export of a box spanning 0..1 m on X, 0..2 m on Y
+        // and 0..3 m on Z, produced by Unreal/Tests/run_export_test.py.
+        [Test]
+        public void ImportUnrealExport_KeepsUnitsAndOrientation()
+        {
+            string export = Path.Combine(Path.GetDirectoryName(PortageManifestTests.FixturePath), "Block");
+            PortageImportReport report = PortageImporter.Import(export, Root + "/Block", null);
+            Assert.AreEqual(0, report.ErrorCount);
+            Assert.IsFalse(report.Entries.Any(e => e.Code == "slot.unmatched"));
+
+            var model = AssetDatabase.LoadAssetAtPath<GameObject>(Root + "/Block/Meshes/SM_Block.fbx");
+            Assert.IsNotNull(model);
+            Renderer renderer = model.GetComponentInChildren<Renderer>();
+            Assert.AreEqual(Vector3.one, renderer.transform.lossyScale);
+            Assert.Less(Quaternion.Angle(Quaternion.identity, renderer.transform.rotation), 0.1f);
+
+            // Unreal (X, Y, Z) in centimetres arrives as Unity (X, Z, -Y) in metres.
+            Bounds bounds = renderer.bounds;
+            Assert.Less(Vector3.Distance(new Vector3(1f, 3f, 2f), bounds.size), 0.01f, bounds.size.ToString("F3"));
+            Assert.Less(Vector3.Distance(new Vector3(0.5f, 1.5f, -1f), bounds.center), 0.01f, bounds.center.ToString("F3"));
+
+            // Unreal names FBX materials after the material asset, not the slot ("Body").
+            var material = AssetDatabase.LoadAssetAtPath<Material>(Root + "/Block/Materials/MI_Block.mat");
+            Assert.IsNotNull(material);
+            Assert.AreEqual(material, renderer.sharedMaterials[0]);
+            Assert.AreEqual(0f, material.GetFloat("_Cull"), "two-sided override");
+            Assert.IsNull(AssetDatabase.LoadAssetAtPath<Material>(Root + "/Block/Materials/M_Embedded.mat"));
+        }
+
         [Test]
         public void ImportTwice_KeepsMaterialGuid()
         {

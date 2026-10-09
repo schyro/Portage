@@ -14,15 +14,18 @@ namespace Portage
 
         readonly PortageManifest _manifest;
         readonly PortageMappingTable _table;
+        readonly PortageMappingFile _mapping;
         readonly PortageTextureProcessor _textures;
         readonly string _materialFolder;
         readonly PortageImportReport _report;
 
         public PortageMaterialBuilder(PortageManifest manifest, PortageMappingTable table,
-            PortageTextureProcessor textures, string materialFolder, PortageImportReport report)
+            PortageTextureProcessor textures, string materialFolder, PortageImportReport report,
+            PortageMappingFile mapping = null)
         {
             _manifest = manifest;
             _table = table;
+            _mapping = mapping;
             _textures = textures;
             _materialFolder = materialFolder;
             _report = report;
@@ -91,18 +94,27 @@ namespace Portage
 
         void Populate(PortageManifest.MaterialEntry entry, Material material)
         {
+            PortageMappingResolution resolution =
+                PortageMappingResolver.Resolve(entry, _manifest, _table, _mapping);
+
             var recipe = new PortageTextureProcessor.MaskRecipe();
             var maskNames = new List<string>();
             Texture2D baseMap = null, normalMap = null, emissionMap = null;
+            bool anyResolved = false;
 
-            foreach (PortageManifest.TextureParameter parameter in entry.textureParameters)
+            for (int i = 0; i < entry.textureParameters.Count; i++)
             {
-                PortageMappingTable.TextureRule rule = _table.FindTextureRule(parameter.name);
-                if (rule == null)
+                PortageManifest.TextureParameter parameter = entry.textureParameters[i];
+                TextureDecision decision = resolution.Textures[i];
+                if (!decision.IsMapped)
                 {
                     ReportUnmapped(entry, "texture", parameter.name);
                     continue;
                 }
+
+                anyResolved = true;
+                if (decision.Usage == TextureUsage.Ignore)
+                    continue;
 
                 if (string.IsNullOrEmpty(parameter.texture))
                 {
@@ -119,42 +131,88 @@ namespace Portage
                     continue;
                 }
 
-                switch (rule.usage)
+                if (decision.Source == MappingSource.Guess)
+                {
+                    string what = decision.Usage == TextureUsage.Mask
+                        ? $"Mask (R={decision.Red}, G={decision.Green}, B={decision.Blue}, A={decision.Alpha})"
+                        : decision.Usage.ToString();
+                    ReportGuessed(entry, "texture", parameter.name, what);
+                }
+
+                switch (decision.Usage)
                 {
                     case TextureUsage.BaseColor:
-                        baseMap = ImportAndLoad(texture) ?? baseMap;
+                        if (baseMap != null)
+                        {
+                            ReportDuplicate(entry, parameter.name, decision.Usage);
+                            break;
+                        }
+
+                        baseMap = ImportAndLoad(texture);
                         break;
                     case TextureUsage.Normal:
-                        normalMap = ImportAndLoad(texture) ?? normalMap;
+                        if (normalMap != null)
+                        {
+                            ReportDuplicate(entry, parameter.name, decision.Usage);
+                            break;
+                        }
+
+                        normalMap = ImportAndLoad(texture);
                         break;
                     case TextureUsage.Emission:
-                        emissionMap = ImportAndLoad(texture) ?? emissionMap;
+                        if (emissionMap != null)
+                        {
+                            ReportDuplicate(entry, parameter.name, decision.Usage);
+                            break;
+                        }
+
+                        emissionMap = ImportAndLoad(texture);
                         break;
                     case TextureUsage.Mask:
                         string path = _textures.ResolveExportPath(texture.file);
                         if (!maskNames.Contains(texture.name))
                             maskNames.Add(texture.name);
-                        AddMaskChannel(recipe, rule.red, PortageTextureProcessor.SourceChannel.R, path);
-                        AddMaskChannel(recipe, rule.green, PortageTextureProcessor.SourceChannel.G, path);
-                        AddMaskChannel(recipe, rule.blue, PortageTextureProcessor.SourceChannel.B, path);
-                        AddMaskChannel(recipe, rule.alpha, PortageTextureProcessor.SourceChannel.A, path);
+                        AddMaskChannel(recipe, decision.Red, PortageTextureProcessor.SourceChannel.R, path);
+                        AddMaskChannel(recipe, decision.Green, PortageTextureProcessor.SourceChannel.G, path);
+                        AddMaskChannel(recipe, decision.Blue, PortageTextureProcessor.SourceChannel.B, path);
+                        AddMaskChannel(recipe, decision.Alpha, PortageTextureProcessor.SourceChannel.A, path);
                         break;
                 }
             }
 
+            if (entry.textureParameters.Count > 0 && !anyResolved)
+            {
+                _report.Warning("material.noTextureMatched", entry.id,
+                    $"{entry.name}: none of its {entry.textureParameters.Count} texture parameters could be mapped " +
+                    "(no saved choice, mapping table rule or guess), so the material has no textures. Review the " +
+                    "parameter mapping in the import window or assign a mapping table with rules for this asset pack.");
+            }
+
             // Scalars are collected first because the mask packing depends on them.
             var scalars = new Dictionary<string, float>();
-            foreach (PortageManifest.ScalarParameter parameter in entry.scalarParameters)
+            for (int i = 0; i < entry.scalarParameters.Count; i++)
             {
-                PortageMappingTable.ScalarRule rule = _table.FindScalarRule(parameter.name);
-                if (rule == null)
+                PortageManifest.ScalarParameter parameter = entry.scalarParameters[i];
+                ScalarDecision decision = resolution.Scalars[i];
+                if (!decision.IsMapped)
                 {
                     ReportUnmapped(entry, "scalar", parameter.name);
                     continue;
                 }
 
-                float value = rule.conversion == ScalarConversion.OneMinus ? 1f - parameter.value : parameter.value;
-                scalars[rule.property] = value;
+                if (decision.IsIgnored)
+                    continue;
+
+                if (decision.Source == MappingSource.Guess)
+                {
+                    ReportGuessed(entry, "scalar", parameter.name,
+                        decision.Conversion == ScalarConversion.OneMinus
+                            ? $"{decision.Property} (1 - value)"
+                            : decision.Property);
+                }
+
+                float value = decision.Conversion == ScalarConversion.OneMinus ? 1f - parameter.value : parameter.value;
+                scalars[decision.Property] = value;
             }
 
             SetTexture(entry, material, "_BaseMap", baseMap);
@@ -201,16 +259,24 @@ namespace Portage
                 SetColor(entry, material, "_EmissionColor", Color.white);
             }
 
-            foreach (PortageManifest.VectorParameter parameter in entry.vectorParameters)
+            for (int i = 0; i < entry.vectorParameters.Count; i++)
             {
-                PortageMappingTable.VectorRule rule = _table.FindVectorRule(parameter.name);
-                if (rule == null)
+                PortageManifest.VectorParameter parameter = entry.vectorParameters[i];
+                VectorDecision decision = resolution.Vectors[i];
+                if (!decision.IsMapped)
                 {
                     ReportUnmapped(entry, "vector", parameter.name);
                     continue;
                 }
 
-                SetColor(entry, material, rule.property, ToPropertySpace(material, rule.property, parameter.ToColor()));
+                if (decision.IsIgnored)
+                    continue;
+
+                if (decision.Source == MappingSource.Guess)
+                    ReportGuessed(entry, "vector", parameter.name, decision.Property);
+
+                SetColor(entry, material, decision.Property,
+                    ToPropertySpace(material, decision.Property, parameter.ToColor()));
             }
 
             if (material.HasProperty("_EmissionColor") && material.GetColor("_EmissionColor").maxColorComponent > 0f)
@@ -292,7 +358,19 @@ namespace Portage
         void ReportUnmapped(PortageManifest.MaterialEntry entry, string kind, string parameterName)
         {
             _report.Info("parameter.unmapped", entry.id,
-                $"Material '{entry.name}': {kind} parameter '{parameterName}' has no rule in the mapping table and was ignored.");
+                $"Material '{entry.name}': {kind} parameter '{parameterName}' has no saved choice, table rule or guess and was ignored.");
+        }
+
+        void ReportGuessed(PortageManifest.MaterialEntry entry, string kind, string parameterName, string what)
+        {
+            _report.Info("parameter.guessed", entry.id,
+                $"Material '{entry.name}': {kind} parameter '{parameterName}' was guessed as {what}. Review it in the import window.");
+        }
+
+        void ReportDuplicate(PortageManifest.MaterialEntry entry, string parameterName, TextureUsage usage)
+        {
+            _report.Info("parameter.duplicateUsage", entry.id,
+                $"Material '{entry.name}': texture parameter '{parameterName}' also maps to {usage}, which an earlier parameter already uses; it was ignored.");
         }
 
         void SetTexture(PortageManifest.MaterialEntry entry, Material material, string property, Texture texture)

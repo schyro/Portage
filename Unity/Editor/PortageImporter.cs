@@ -38,6 +38,10 @@ namespace Portage
                 return report;
             }
 
+            PortageMappingFile mapping = PortageMappingFile.Load(exportFolder);
+            if (!string.IsNullOrEmpty(mapping.LoadError))
+                report.Warning("mapping.invalid", "", mapping.LoadError);
+
             PortageMappingTable temporaryTable = null;
             if (table == null)
             {
@@ -60,7 +64,7 @@ namespace Portage
                 // Textures are imported on demand while materials are built, so only textures that a
                 // convertible material uses through a matching rule end up in the project.
                 var textures = new PortageTextureProcessor(exportFolder, textureFolder, table, report);
-                var builder = new PortageMaterialBuilder(manifest, table, textures, materialFolder, report);
+                var builder = new PortageMaterialBuilder(manifest, table, textures, materialFolder, report, mapping);
                 var materials = new Dictionary<string, Material>();
                 foreach (PortageManifest.MaterialEntry entry in manifest.materials)
                 {
@@ -187,15 +191,18 @@ namespace Portage
             return names;
         }
 
-        /// <summary>Matches by slot name, then by the slot material's name, then by slot index.</summary>
+        /// <summary>
+        /// Matches by the slot material's name (what Unreal writes into the FBX), then by slot name,
+        /// then by slot index.
+        /// </summary>
         static PortageManifest.SlotEntry FindSlot(PortageManifest manifest, PortageManifest.MeshEntry mesh,
             string fbxMaterialName, int index)
         {
-            PortageManifest.SlotEntry slot = mesh.slots.Find(s => s.name == fbxMaterialName);
+            PortageManifest.SlotEntry slot = mesh.slots.Find(s => manifest.FindMaterial(s.material)?.name == fbxMaterialName);
             if (slot != null)
                 return slot;
 
-            slot = mesh.slots.Find(s => manifest.FindMaterial(s.material)?.name == fbxMaterialName);
+            slot = mesh.slots.Find(s => s.name == fbxMaterialName);
             if (slot != null)
                 return slot;
 

@@ -21,6 +21,9 @@ namespace Portage
         /// Its channels are repacked into the layout URP Lit expects.
         /// </summary>
         Mask,
+
+        /// <summary>The parameter is deliberately unused. Always the last member; assets serialize the ints.</summary>
+        Ignore,
     }
 
     /// <summary>What a single channel of a <see cref="TextureUsage.Mask"/> texture contains.</summary>

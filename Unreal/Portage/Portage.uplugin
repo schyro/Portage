@@ -1,0 +1,24 @@
+{
+	"FileVersion": 3,
+	"Version": 1,
+	"VersionName": "0.1.0",
+	"FriendlyName": "Portage",
+	"Description": "Exports static meshes, textures and material instance parameters for the Portage Unity importer.",
+	"Category": "Importers",
+	"CreatedBy": "Serkan Yalnız",
+	"CreatedByURL": "https://github.com/schyro/Portage",
+	"DocsURL": "https://github.com/schyro/Portage",
+	"CanContainContent": true,
+	"IsBetaVersion": true,
+	"Installed": false,
+	"Plugins": [
+		{
+			"Name": "PythonScriptPlugin",
+			"Enabled": true
+		},
+		{
+			"Name": "EditorScriptingUtilities",
+			"Enabled": true
+		}
+	]
+}
