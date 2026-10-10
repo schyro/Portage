@@ -151,8 +151,10 @@ namespace Portage
                 if (texture == null)
                     continue;
 
-                // A colour mask is the one usage a placeholder texture is allowed for: a uniform grey mask
-                // legitimately means "apply the tint partially". At most one per material.
+                // A color mask is the one usage a placeholder texture is allowed for: a uniform grey mask
+                // legitimately means "apply the tint partially". Whether it is uniform is only known once it
+                // is read, so the material builder drops a guessed placeholder that is not. At most one per
+                // material.
                 if (ColorMaskNames.Contains(NormalizeName(parameter.name)))
                 {
                     if (!colorMaskFound)

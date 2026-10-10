@@ -91,6 +91,15 @@ namespace Portage.Tests
         }
 
         [Test]
+        public void TintBaseColor_LinearBaseSkipsTheTransferFunctions()
+        {
+            Color32[] result = PortageTextureProcessor.TintBaseColor(Grey(1, 200), 1, 1, MaskOf(255), 1, 1, false,
+                new Color(1f, 0.5f, 0f), baseIsSrgb: false);
+
+            Assert.AreEqual(new Color32(200, 100, 0, 255), result[0]);
+        }
+
+        [Test]
         public void IsUniformMask_AllowsTwoLevelsOfNoise()
         {
             Assert.IsTrue(PortageTextureProcessor.IsUniformMask(MaskOf(100, 102, 101), out byte value));
@@ -102,7 +111,7 @@ namespace Portage.Tests
         }
 
         // Adds a black/white mask texture and a Color_Mask parameter to the Block export's manifest.
-        string CopyBlockWithMask(byte left, byte right)
+        string CopyBlockWithMask(byte left, byte right, string textureName = "T_Block_Mask")
         {
             string source = Path.Combine(Path.GetDirectoryName(PortageManifestTests.FixturePath), "Block");
             _tempExport = Path.Combine(Path.GetTempPath(), "portage-colormask-" + System.Guid.NewGuid().ToString("N"));
@@ -131,7 +140,7 @@ namespace Portage.Tests
             const string parameterAnchor = "\"textureParameters\": [";
             Assert.IsTrue(json.Contains(textureAnchor) && json.Contains(parameterAnchor));
             json = json.Replace(textureAnchor, textureAnchor +
-                "{\"id\":\"/Game/PortageTest/T_Block_Mask.T_Block_Mask\",\"name\":\"T_Block_Mask\"," +
+                "{\"id\":\"/Game/PortageTest/T_Block_Mask.T_Block_Mask\",\"name\":\"" + textureName + "\"," +
                 "\"file\":\"Textures/T_Block_Mask.png\",\"width\":2,\"height\":1,\"srgb\":false," +
                 "\"compression\":\"Masks\",\"flipGreenChannel\":false},");
             // Only the first occurrence: it belongs to MI_Block; the second material has an empty array.
@@ -156,15 +165,51 @@ namespace Portage.Tests
             var material = AssetDatabase.LoadAssetAtPath<Material>(Root + "/Block/Materials/MI_Block.mat");
             Assert.AreEqual(baked, material.GetTexture("_BaseMap"));
             Assert.AreEqual(Color.white, material.GetColor("_BaseColor"));
+            Assert.IsTrue(((TextureImporter)AssetImporter.GetAtPath(bakedPath)).sRGBTexture);
             Assert.IsNull(AssetDatabase.LoadAssetAtPath<Texture2D>(Root + "/Block/Textures/T_Block_D.png"));
             Assert.IsTrue(report.Entries.Any(e => e.Code == "colorMask.baked" && e.Message.Contains("MI_Block_BaseColor.png")));
             Assert.IsTrue(report.Entries.Any(e => e.Code == "parameter.guessed" && e.Message.Contains("ColorMask")));
         }
 
         [Test]
+        public void ColorMask_BakedCopyKeepsTheColorSpaceOfALinearBaseTexture()
+        {
+            string export = CopyBlockWithMask(0, 255);
+            // T_Block_D is the only sRGB texture of the export.
+            string manifestPath = Path.Combine(export, "manifest.json");
+            string json = File.ReadAllText(manifestPath);
+            Assert.IsTrue(json.Contains("\"srgb\": true"));
+            File.WriteAllText(manifestPath, json.Replace("\"srgb\": true", "\"srgb\": false"));
+
+            PortageImportReport report = PortageImporter.Import(export, Root + "/Block", null);
+
+            Assert.AreEqual(0, report.ErrorCount);
+            var importer = AssetImporter.GetAtPath(Root + "/Block/Textures/MI_Block_BaseColor.png") as TextureImporter;
+            Assert.IsNotNull(importer);
+            Assert.IsFalse(importer.sRGBTexture);
+        }
+
+        [Test]
+        public void ColorMask_BakedCopyDoesNotTakeTheNameOfAnExportedTexture()
+        {
+            string export = CopyBlockWithMask(0, 255);
+            string textures = Path.Combine(export, "Textures");
+            File.Copy(Path.Combine(textures, "T_Block_D.png"), Path.Combine(textures, "MI_Block_BaseColor.png"));
+
+            PortageImportReport report = PortageImporter.Import(export, Root + "/Block", null);
+
+            Assert.AreEqual(0, report.ErrorCount);
+            var baked = AssetDatabase.LoadAssetAtPath<Texture2D>(Root + "/Block/Textures/MI_Block_BaseColor_2.png");
+            Assert.IsNotNull(baked);
+            var material = AssetDatabase.LoadAssetAtPath<Material>(Root + "/Block/Materials/MI_Block.mat");
+            Assert.AreEqual(baked, material.GetTexture("_BaseMap"));
+            Assert.IsNull(AssetDatabase.LoadAssetAtPath<Texture2D>(Root + "/Block/Textures/MI_Block_BaseColor.png"));
+        }
+
+        [Test]
         public void ColorMask_UniformMaskOnlyScalesTheTint()
         {
-            string export = CopyBlockWithMask(255, 255);
+            string export = CopyBlockWithMask(128, 128);
 
             PortageImportReport report = PortageImporter.Import(export, Root + "/Block", null);
 
@@ -174,6 +219,58 @@ namespace Portage.Tests
             Assert.IsNotNull(AssetDatabase.LoadAssetAtPath<Texture2D>(Root + "/Block/Textures/T_Block_D.png"));
             Assert.IsNull(AssetDatabase.LoadAssetAtPath<Texture2D>(Root + "/Block/Textures/MI_Block_BaseColor.png"));
             Assert.IsFalse(report.Entries.Any(e => e.Code == "colorMask.baked"));
+            // Half-way between white and the tint's green of 0.9; an unscaled tint would give 0.9.
+            Assert.AreEqual(Mathf.Lerp(1f, 0.9f, 128 / 255f), material.GetColor("_BaseColor").linear.g, 0.005f);
+        }
+
+        [Test]
+        public void ColorMask_GuessedPlaceholderWithAPatternIsNotBaked()
+        {
+            string export = CopyBlockWithMask(0, 255, "T_Gray");
+
+            PortageImportReport report = PortageImporter.Import(export, Root + "/Block", null);
+
+            Assert.AreEqual(0, report.ErrorCount);
+            Assert.AreEqual(1, report.Entries.Count(e => e.Code == "colorMask.placeholder"));
+            Assert.IsFalse(report.Entries.Any(e => e.Code == "colorMask.baked"));
+            Assert.IsNotNull(AssetDatabase.LoadAssetAtPath<Texture2D>(Root + "/Block/Textures/T_Block_D.png"));
+            var material = AssetDatabase.LoadAssetAtPath<Material>(Root + "/Block/Materials/MI_Block.mat");
+            Assert.AreEqual(0.9f, material.GetColor("_BaseColor").linear.g, 0.01f);
+        }
+
+        [Test]
+        public void ColorMask_UnreadableMaskFallsBackToThePlainTint()
+        {
+            string export = CopyBlockWithMask(0, 255);
+            File.Delete(Path.Combine(export, "Textures", "T_Block_Mask.png"));
+
+            PortageImportReport report = PortageImporter.Import(export, Root + "/Block", null);
+
+            Assert.AreEqual(1, report.ErrorCount);
+            Assert.IsTrue(report.Entries.Any(e => e.Code == "texture.missingFile"));
+            Assert.IsFalse(report.Entries.Any(e => e.Code == "colorMask.baked"));
+            Assert.IsNotNull(AssetDatabase.LoadAssetAtPath<Texture2D>(Root + "/Block/Textures/T_Block_D.png"));
+            var material = AssetDatabase.LoadAssetAtPath<Material>(Root + "/Block/Materials/MI_Block.mat");
+            Assert.AreEqual(0.9f, material.GetColor("_BaseColor").linear.g, 0.01f);
+        }
+
+        [Test]
+        public void ColorMask_WithoutABaseTextureWarnsThatTheTintCoversEverything()
+        {
+            string export = CopyBlockWithMask(0, 255);
+            PortageManifest manifest = PortageManifest.Load(Path.Combine(export, "manifest.json"));
+            PortageManifest.MaterialEntry entry = manifest.materials.First(m => m.name == "MI_Block");
+            var file = new PortageMappingFile();
+            file.SetTexture(PortageMappingFile.KeyOf(entry), "BaseColor", TextureUsage.Ignore);
+            file.Save(export);
+
+            PortageImportReport report = PortageImporter.Import(export, Root + "/Block", null);
+
+            Assert.AreEqual(0, report.ErrorCount);
+            Assert.AreEqual(1, report.Entries.Count(e =>
+                e.Code == "colorMask.unused" && e.Severity == PortageSeverity.Warning));
+            Assert.IsFalse(report.Entries.Any(e => e.Code == "colorMask.baked"));
+            var material = AssetDatabase.LoadAssetAtPath<Material>(Root + "/Block/Materials/MI_Block.mat");
             Assert.AreEqual(0.9f, material.GetColor("_BaseColor").linear.g, 0.01f);
         }
 

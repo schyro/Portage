@@ -26,8 +26,8 @@ namespace Portage
         Ignore,
 
         /// <summary>
-        /// Limits the base colour tint to the white areas of this texture. URP Lit has no tint mask, so the
-        /// tint is baked into a copy of the base colour texture. Always the last member.
+        /// Limits the base color tint to the white areas of this texture (its red channel). URP Lit has no
+        /// tint mask, so the tint is baked into a copy of the base color texture. Always the last member.
         /// </summary>
         ColorMask,
     }

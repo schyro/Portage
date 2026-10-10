@@ -85,7 +85,7 @@ namespace Portage.Tests
             Assert.AreEqual(MaskChannel.Metallic, mask.Blue);
             Assert.AreEqual(MaskChannel.None, mask.Alpha);
 
-            // A colour mask is guessed even though its texture is a placeholder.
+            // A color mask is guessed even though its texture is a placeholder.
             Assert.AreEqual(TextureUsage.ColorMask, result.FindTexture("Color_Mask").Usage);
 
             Assert.AreEqual(1, result.Scalars.Count);

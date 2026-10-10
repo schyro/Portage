@@ -52,7 +52,7 @@ namespace Portage
             public bool Invert;
         }
 
-        /// <summary>A decoded colour mask image, see <see cref="LoadColorMask"/>.</summary>
+        /// <summary>A decoded color mask image, see <see cref="LoadColorMask"/>.</summary>
         public sealed class ColorMaskImage
         {
             public Color32[] Pixels;
@@ -78,6 +78,11 @@ namespace Portage
         readonly Dictionary<string, string> _keyByMaskPath = new Dictionary<string, string>();
         readonly Dictionary<string, string> _bakedByKey = new Dictionary<string, string>();
         readonly Dictionary<string, string> _keyByBakedPath = new Dictionary<string, string>();
+
+        // The most recently decoded color mask: instances of one master material usually share theirs.
+        // Only one is kept so a run never holds more than one decoded mask in memory.
+        string _lastColorMaskPath;
+        ColorMaskImage _lastColorMask;
 
         public PortageTextureProcessor(string exportFolder, string textureFolder, PortageMappingTable table,
             PortageImportReport report)
@@ -216,23 +221,9 @@ namespace Portage
             while (_keyByMaskPath.TryGetValue(assetPath, out string owner) && owner != key)
                 assetPath = _textureFolder + "/" + safeName + "_Mask_" + suffix++ + ".png";
 
-            var texture = new Texture2D(width, height, TextureFormat.RGBA32, false, true);
-            try
-            {
-                texture.SetPixels32(packed);
-                texture.Apply(false);
-                PortageAssetUtil.WriteIfChanged(PortageAssetUtil.ToAbsolutePath(assetPath), texture.EncodeToPNG());
-            }
-            finally
-            {
-                Object.DestroyImmediate(texture);
-            }
-
-            AssetDatabase.ImportAsset(assetPath, ImportAssetOptions.ForceSynchronousImport);
-            var importer = AssetImporter.GetAtPath(assetPath) as TextureImporter;
+            TextureImporter importer = WriteAndImport(assetPath, packed, width, height, true, baseName);
             if (importer == null)
             {
-                _report.Error("texture.importFailed", baseName, $"Unity could not import {assetPath} as a texture.");
                 _masksByKey[key] = null;
                 return null;
             }
@@ -272,12 +263,18 @@ namespace Portage
         }
 
         /// <summary>
-        /// Reads a colour mask texture from the export folder (PNG or JPG only). Returns null, with an
+        /// Reads a color mask texture from the export folder (PNG or JPG only). Returns null, with an
         /// error in the report, when it cannot be read.
         /// </summary>
         public ColorMaskImage LoadColorMask(PortageManifest.TextureEntry mask, string owner)
         {
-            Color32[] pixels = LoadPixels(ResolveExportPath(mask.file), owner, "colour mask", out int width, out int height);
+            string path = ResolveExportPath(mask.file);
+            if (path == _lastColorMaskPath)
+                return _lastColorMask;
+
+            _lastColorMaskPath = path;
+            _lastColorMask = null;
+            Color32[] pixels = LoadPixels(path, owner, "color mask", out int width, out int height);
             if (pixels == null)
                 return null;
 
@@ -285,56 +282,50 @@ namespace Portage
             image.IsUniform = IsUniformMask(pixels, out byte value);
             float encoded = value / 255f;
             image.UniformValue = mask.srgb ? SrgbToLinear(encoded) : encoded;
+            _lastColorMask = image;
             return image;
         }
 
         /// <summary>
         /// Bakes <c>base * lerp(1, tint, mask)</c> into <c>&lt;materialName&gt;_BaseColor.png</c> in the texture
-        /// folder and imports it like a normal base colour texture. Returns the asset path, or null (with a
-        /// report entry) on failure. The same combination of base, mask and tint yields the same asset within
-        /// one run; re-importing updates the file in place and keeps its GUID.
+        /// folder and imports it like a normal base color texture, with the sRGB setting of the base. Returns
+        /// the asset path, or null (with a report entry) on failure. The same combination of base, mask and
+        /// tint yields the same asset within one run; re-importing updates the file in place and keeps its GUID.
         /// </summary>
-        /// <param name="tintLinear">Tint in linear space. Its alpha is ignored.</param>
+        /// <param name="tintLinear">Tint in linear space. Its alpha is ignored; components above 1 are clamped.</param>
         public string BakeTintedBaseColor(string materialName, PortageManifest.TextureEntry baseTexture,
             PortageManifest.TextureEntry maskTexture, ColorMaskImage mask, Color tintLinear)
         {
             string basePath = ResolveExportPath(baseTexture.file);
-            string key = $"B:{basePath}|M:{ResolveExportPath(maskTexture.file)}|T:{tintLinear.r:0.#####},{tintLinear.g:0.#####},{tintLinear.b:0.#####}";
+            // Invariant culture: a decimal comma could not be told apart from the separator.
+            string key = FormattableString.Invariant(
+                $"B:{basePath}|M:{ResolveExportPath(maskTexture.file)}|T:{tintLinear.r:0.#####},{tintLinear.g:0.#####},{tintLinear.b:0.#####}");
             if (_bakedByKey.TryGetValue(key, out string existing))
                 return existing;
 
-            Color32[] basePixels = LoadPixels(basePath, materialName, "base colour texture", out int width, out int height);
+            Color32[] basePixels = LoadPixels(basePath, materialName, "base color texture", out int width, out int height);
             if (basePixels == null)
             {
                 _bakedByKey[key] = null;
                 return null;
             }
 
-            Color32[] baked = TintBaseColor(basePixels, width, height, mask.Pixels, mask.Width, mask.Height, mask.Srgb, tintLinear);
+            Color32[] baked = TintBaseColor(basePixels, width, height, mask.Pixels, mask.Width, mask.Height, mask.Srgb,
+                tintLinear, baseTexture.srgb);
 
+            // ImportTexture copies exported textures to the same folder under their own file name, so a name
+            // that one of them has is taken as well.
+            string sourceFolder = System.IO.Path.GetDirectoryName(basePath);
             string safeName = PortageAssetUtil.SanitizeFileName(materialName);
             string assetPath = _textureFolder + "/" + safeName + "_BaseColor.png";
             int suffix = 2;
-            while (_keyByBakedPath.TryGetValue(assetPath, out string owner) && owner != key)
+            while (File.Exists(System.IO.Path.Combine(sourceFolder, System.IO.Path.GetFileName(assetPath)))
+                   || (_keyByBakedPath.TryGetValue(assetPath, out string owner) && owner != key))
                 assetPath = _textureFolder + "/" + safeName + "_BaseColor_" + suffix++ + ".png";
 
-            var texture = new Texture2D(width, height, TextureFormat.RGBA32, false, false);
-            try
-            {
-                texture.SetPixels32(baked);
-                texture.Apply(false);
-                PortageAssetUtil.WriteIfChanged(PortageAssetUtil.ToAbsolutePath(assetPath), texture.EncodeToPNG());
-            }
-            finally
-            {
-                Object.DestroyImmediate(texture);
-            }
-
-            AssetDatabase.ImportAsset(assetPath, ImportAssetOptions.ForceSynchronousImport);
-            var importer = AssetImporter.GetAtPath(assetPath) as TextureImporter;
+            TextureImporter importer = WriteAndImport(assetPath, baked, width, height, false, materialName);
             if (importer == null)
             {
-                _report.Error("texture.importFailed", materialName, $"Unity could not import {assetPath} as a texture.");
                 _bakedByKey[key] = null;
                 return null;
             }
@@ -346,9 +337,9 @@ namespace Portage
                 dirty = true;
             }
 
-            if (!importer.sRGBTexture)
+            if (importer.sRGBTexture != baseTexture.srgb)
             {
-                importer.sRGBTexture = true;
+                importer.sRGBTexture = baseTexture.srgb;
                 dirty = true;
             }
 
@@ -361,14 +352,40 @@ namespace Portage
             return assetPath;
         }
 
+        // Writes the pixels to a PNG at the asset path and imports it. Returns the importer, or null with an
+        // error in the report.
+        TextureImporter WriteAndImport(string assetPath, Color32[] pixels, int width, int height, bool linear,
+            string owner)
+        {
+            var texture = new Texture2D(width, height, TextureFormat.RGBA32, false, linear);
+            try
+            {
+                texture.SetPixels32(pixels);
+                texture.Apply(false);
+                PortageAssetUtil.WriteIfChanged(PortageAssetUtil.ToAbsolutePath(assetPath), texture.EncodeToPNG());
+            }
+            finally
+            {
+                Object.DestroyImmediate(texture);
+            }
+
+            AssetDatabase.ImportAsset(assetPath, ImportAssetOptions.ForceSynchronousImport);
+            var importer = AssetImporter.GetAtPath(assetPath) as TextureImporter;
+            if (importer == null)
+                _report.Error("texture.importFailed", owner, $"Unity could not import {assetPath} as a texture.");
+            return importer;
+        }
+
         /// <summary>
-        /// Pure pixel function: <c>out.rgb = toSRGB(toLinear(base.rgb) * lerp(1, tint.rgb, m))</c>, alpha taken
+        /// Pure pixel function: <c>out.rgb = encode(decode(base.rgb) * lerp(1, tint.rgb, m))</c>, alpha taken
         /// from the base. <c>m</c> is the red channel of the mask (converted to linear when
         /// <paramref name="maskIsSrgb"/>), sampled bilinearly by UV when the sizes differ. The result has the
-        /// size of the base. The tint is linear; its alpha is ignored.
+        /// size of the base. The tint is linear; its alpha is ignored. The base is decoded and encoded as sRGB
+        /// when <paramref name="baseIsSrgb"/>, and used as it is otherwise.
         /// </summary>
         public static Color32[] TintBaseColor(Color32[] basePixels, int baseWidth, int baseHeight,
-            Color32[] maskPixels, int maskWidth, int maskHeight, bool maskIsSrgb, Color tintLinear)
+            Color32[] maskPixels, int maskWidth, int maskHeight, bool maskIsSrgb, Color tintLinear,
+            bool baseIsSrgb = true)
         {
             if (baseWidth <= 0 || baseHeight <= 0 || basePixels == null || basePixels.Length != baseWidth * baseHeight)
                 throw new ArgumentException("The base pixels do not match the given size.");
@@ -396,9 +413,9 @@ namespace Portage
 
                     Color32 p = basePixels[index];
                     result[index] = new Color32(
-                        TintChannel(p.r, tintLinear.r, m),
-                        TintChannel(p.g, tintLinear.g, m),
-                        TintChannel(p.b, tintLinear.b, m),
+                        TintChannel(p.r, Mathf.Lerp(1f, tintLinear.r, m), baseIsSrgb),
+                        TintChannel(p.g, Mathf.Lerp(1f, tintLinear.g, m), baseIsSrgb),
+                        TintChannel(p.b, Mathf.Lerp(1f, tintLinear.b, m), baseIsSrgb),
                         p.a);
                 }
             }
@@ -441,10 +458,25 @@ namespace Portage
             return c <= 0.0031308f ? c * 12.92f : 1.055f * Mathf.Pow(c, 1f / 2.4f) - 0.055f;
         }
 
-        static byte TintChannel(byte encoded, float tint, float m)
+        // sRGB bytes as linear values, computed once per value instead of once per texel.
+        static readonly float[] SrgbDecodeTable = BuildSrgbDecodeTable();
+
+        static float[] BuildSrgbDecodeTable()
         {
-            float linear = SrgbToLinear(encoded / 255f) * Mathf.Lerp(1f, tint, m);
-            return (byte)Mathf.RoundToInt(Mathf.Clamp01(LinearToSrgb(Mathf.Clamp01(linear))) * 255f);
+            var table = new float[256];
+            for (int i = 0; i < table.Length; i++)
+                table[i] = SrgbToLinear(i / 255f);
+            return table;
+        }
+
+        static byte TintChannel(byte encoded, float factor, bool srgb)
+        {
+            // An untinted channel keeps its byte, which also skips the transfer functions.
+            if (factor == 1f)
+                return encoded;
+
+            float linear = Mathf.Clamp01((srgb ? SrgbDecodeTable[encoded] : encoded / 255f) * factor);
+            return (byte)Mathf.RoundToInt(Mathf.Clamp01(srgb ? LinearToSrgb(linear) : linear) * 255f);
         }
 
         static float SampleBilinear(float[] values, int width, int height, float u, float v)
@@ -470,7 +502,7 @@ namespace Portage
             if (extension != ".png" && extension != ".jpg" && extension != ".jpeg")
             {
                 _report.Error("mask.unsupportedFormat", owner,
-                    $"Cannot read {what} '{path}': only .png and .jpg sources are supported. Baking the colour mask was skipped.");
+                    $"Cannot read {what} '{path}': only .png and .jpg sources are supported. It was skipped.");
                 return null;
             }
 
@@ -566,42 +598,18 @@ namespace Portage
             if (source == null)
                 return null;
 
-            string extension = System.IO.Path.GetExtension(source.Path).ToLowerInvariant();
-            if (extension != ".png" && extension != ".jpg" && extension != ".jpeg")
-            {
-                _report.Error("mask.unsupportedFormat", owner,
-                    $"Cannot pack '{source.Path}': only .png and .jpg sources are supported. The mask was skipped.");
+            Color32[] pixels = LoadPixels(source.Path, owner, "mask source", out int width, out int height);
+            if (pixels == null)
                 return null;
-            }
 
-            if (!File.Exists(source.Path))
+            return new PixelSource
             {
-                _report.Error("texture.missingFile", owner, $"Texture file not found: {source.Path}");
-                return null;
-            }
-
-            var texture = new Texture2D(2, 2, TextureFormat.RGBA32, false, true);
-            try
-            {
-                if (!texture.LoadImage(File.ReadAllBytes(source.Path)))
-                {
-                    _report.Error("mask.decodeFailed", owner, $"Could not decode '{source.Path}'.");
-                    return null;
-                }
-
-                return new PixelSource
-                {
-                    Pixels = texture.GetPixels32(),
-                    Width = texture.width,
-                    Height = texture.height,
-                    Channel = source.Channel,
-                    Invert = source.Invert,
-                };
-            }
-            finally
-            {
-                Object.DestroyImmediate(texture);
-            }
+                Pixels = pixels,
+                Width = width,
+                Height = height,
+                Channel = source.Channel,
+                Invert = source.Invert,
+            };
         }
     }
 

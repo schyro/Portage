@@ -100,10 +100,11 @@ namespace Portage
             var recipe = new PortageTextureProcessor.MaskRecipe();
             var maskNames = new List<string>();
             Texture2D normalMap = null, emissionMap = null;
-            // Base colour and colour mask are imported after the loop: the base texture is not imported
+            // Base color and color mask are imported after the loop: the base texture is not imported
             // at all when a tinted copy replaces it.
             PortageManifest.TextureEntry baseTexture = null, colorMaskTexture = null;
             string colorMaskParameter = null;
+            bool colorMaskGuessed = false;
             bool anyResolved = false;
 
             for (int i = 0; i < entry.textureParameters.Count; i++)
@@ -152,7 +153,12 @@ namespace Portage
                             break;
                         }
 
-                        baseTexture = texture;
+                        // A missing file does not take the slot, so a later parameter can still fill it;
+                        // importing it only reports the problem.
+                        if (System.IO.File.Exists(_textures.ResolveExportPath(texture.file)))
+                            baseTexture = texture;
+                        else
+                            ImportAndLoad(texture);
                         break;
                     case TextureUsage.ColorMask:
                         if (colorMaskTexture != null)
@@ -163,6 +169,7 @@ namespace Portage
 
                         colorMaskTexture = texture;
                         colorMaskParameter = parameter.name;
+                        colorMaskGuessed = decision.Source == MappingSource.Guess;
                         break;
                     case TextureUsage.Normal:
                         if (normalMap != null)
@@ -213,21 +220,42 @@ namespace Portage
 
             Texture2D baseMap = null;
             Color? baseColorOverride = null;
-            if (colorMaskTexture != null && (baseTexture == null || tintIndex < 0))
+            if (colorMaskTexture != null && tintIndex < 0)
             {
                 _report.Info("colorMask.unused", entry.id,
-                    $"{entry.name}: colour mask '{colorMaskParameter}' has no effect because the material has no " +
-                    (baseTexture == null ? "base colour texture" : "base colour tint (a vector parameter mapped to _BaseColor)") +
-                    " to limit.");
+                    $"{entry.name}: color mask '{colorMaskParameter}' has no effect because the material has no " +
+                    "base color tint (a vector parameter mapped to _BaseColor) to limit.");
+            }
+            else if (colorMaskTexture != null && baseTexture == null)
+            {
+                _report.Warning("colorMask.unused", entry.id,
+                    $"{entry.name}: color mask '{colorMaskParameter}' was not applied because the material has no " +
+                    "base color texture to bake it into, so the base color tint covers the whole surface.");
             }
             else if (colorMaskTexture != null)
             {
                 Color tint = entry.vectorParameters[tintIndex].ToColor();
-                PortageTextureProcessor.ColorMaskImage mask = _textures.LoadColorMask(colorMaskTexture, entry.name);
+                // A white tint changes nothing, with or without a mask, so the mask is not even read.
+                bool whiteTint = Mathf.Approximately(tint.r, 1f) && Mathf.Approximately(tint.g, 1f) &&
+                                 Mathf.Approximately(tint.b, 1f);
+                PortageTextureProcessor.ColorMaskImage mask =
+                    whiteTint ? null : _textures.LoadColorMask(colorMaskTexture, entry.name);
                 if (mask != null && mask.IsUniform)
                 {
-                    // A uniform mask needs no baking: the tint is scaled by the mask value instead.
-                    baseColorOverride = Color.Lerp(Color.white, tint, mask.UniformValue);
+                    // A uniform mask needs no baking: the tint is scaled by the mask value instead. The alpha
+                    // is not masked, on any path.
+                    Color scaled = Color.Lerp(Color.white, tint, mask.UniformValue);
+                    scaled.a = tint.a;
+                    baseColorOverride = scaled;
+                }
+                else if (mask != null && colorMaskGuessed && PortageMappingGuesser.IsPlaceholder(colorMaskTexture))
+                {
+                    // The guess accepts a placeholder because a uniform one scales the tint. One with a pattern
+                    // is an unused default rather than a mask.
+                    _report.Info("colorMask.placeholder", entry.id,
+                        $"{entry.name}: color mask '{colorMaskParameter}' was guessed, but its texture " +
+                        $"'{colorMaskTexture.name}' is a placeholder that is not one uniform color, so it was not " +
+                        "used. Set the parameter to ColorMask in the import window to use it anyway.");
                 }
                 else if (mask != null)
                 {
@@ -235,9 +263,9 @@ namespace Portage
                     baseMap = bakedPath != null ? AssetDatabase.LoadAssetAtPath<Texture2D>(bakedPath) : null;
                     if (baseMap != null)
                     {
-                        baseColorOverride = Color.white;
+                        baseColorOverride = new Color(1f, 1f, 1f, tint.a);
                         _report.Info("colorMask.baked", entry.id,
-                            $"{entry.name}: the base colour tint was limited to the white areas of colour mask " +
+                            $"{entry.name}: the base color tint was limited to the white areas of color mask " +
                             $"'{colorMaskParameter}' and baked into {bakedPath}.");
                     }
                 }
