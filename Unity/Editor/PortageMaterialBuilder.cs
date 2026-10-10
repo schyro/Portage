@@ -106,6 +106,9 @@ namespace Portage
             string colorMaskParameter = null;
             bool colorMaskGuessed = false;
             bool anyResolved = false;
+            // An emissive mask held by one channel of a mask texture.
+            PortageTextureProcessor.MaskSource emissionChannel = null;
+            string emissionChannelName = null;
 
             for (int i = 0; i < entry.textureParameters.Count; i++)
             {
@@ -136,12 +139,38 @@ namespace Portage
                     continue;
                 }
 
-                if (decision.Source == MappingSource.Guess)
+                bool guessed = decision.Source == MappingSource.Guess;
+                if (guessed && !(decision.Usage == TextureUsage.Emission && resolution.IsOff(SwitchRole.Emission)))
                 {
                     string what = decision.Usage == TextureUsage.Mask
                         ? $"Mask (R={decision.Red}, G={decision.Green}, B={decision.Blue}, A={decision.Alpha})"
                         : decision.Usage.ToString();
                     ReportGuessed(entry, "texture", parameter.name, what);
+                }
+
+                // A switch that is off keeps the texture out, whatever mapped it: the Unreal material does
+                // not use it either.
+                string textureLabel = $"texture parameter '{parameter.name}'";
+                switch (decision.Usage)
+                {
+                    case TextureUsage.BaseColor:
+                        if (SwitchedOff(entry, resolution, textureLabel, SwitchRole.BaseColorTexture))
+                            continue;
+                        break;
+                    case TextureUsage.ColorMask:
+                        // The mask only limits the tint of the base color texture.
+                        if (SwitchedOff(entry, resolution, textureLabel, SwitchRole.ColorMask, SwitchRole.BaseColorTexture))
+                            continue;
+                        break;
+                    case TextureUsage.Normal:
+                        if (SwitchedOff(entry, resolution, textureLabel, SwitchRole.NormalTexture))
+                            continue;
+                        break;
+                    case TextureUsage.Emission:
+                        if (EmissionOff(entry, resolution, textureLabel, guessed, SwitchRole.EmissionTexture,
+                                SwitchRole.SeparateEmissionTexture))
+                            continue;
+                        break;
                 }
 
                 switch (decision.Usage)
@@ -193,10 +222,51 @@ namespace Portage
                         string path = _textures.ResolveExportPath(texture.file);
                         if (!maskNames.Contains(texture.name))
                             maskNames.Add(texture.name);
-                        AddMaskChannel(recipe, decision.Red, PortageTextureProcessor.SourceChannel.R, path);
-                        AddMaskChannel(recipe, decision.Green, PortageTextureProcessor.SourceChannel.G, path);
-                        AddMaskChannel(recipe, decision.Blue, PortageTextureProcessor.SourceChannel.B, path);
-                        AddMaskChannel(recipe, decision.Alpha, PortageTextureProcessor.SourceChannel.A, path);
+                        var contents = new[] { decision.Red, decision.Green, decision.Blue, decision.Alpha };
+                        for (int c = 0; c < contents.Length; c++)
+                        {
+                            var channel = (PortageTextureProcessor.SourceChannel)c;
+                            string channelLabel = $"the {contents[c]} channel of texture parameter '{parameter.name}'";
+                            switch (contents[c])
+                            {
+                                case MaskChannel.None:
+                                    continue;
+                                case MaskChannel.Metallic:
+                                    if (SwitchedOff(entry, resolution, channelLabel, SwitchRole.MetallicTexture))
+                                        continue;
+                                    break;
+                                case MaskChannel.Roughness:
+                                case MaskChannel.Smoothness:
+                                    if (SwitchedOff(entry, resolution, channelLabel, SwitchRole.RoughnessTexture))
+                                        continue;
+                                    break;
+                                case MaskChannel.Occlusion:
+                                    if (SwitchedOff(entry, resolution, channelLabel, SwitchRole.Occlusion))
+                                        continue;
+                                    break;
+                                case MaskChannel.Emission:
+                                    if (EmissionOff(entry, resolution, channelLabel, guessed, SwitchRole.EmissionTexture))
+                                        continue;
+
+                                    SwitchDecision separate = resolution.SwitchWith(SwitchRole.SeparateEmissionTexture);
+                                    if (separate != null && separate.Value)
+                                    {
+                                        ReportSwitched(entry, channelLabel, separate);
+                                        continue;
+                                    }
+
+                                    if (emissionChannel == null)
+                                    {
+                                        emissionChannel = new PortageTextureProcessor.MaskSource { Path = path, Channel = channel };
+                                        emissionChannelName = texture.name;
+                                    }
+
+                                    continue;
+                            }
+
+                            AddMaskChannel(recipe, contents[c], channel, path);
+                        }
+
                         break;
                 }
             }
@@ -209,12 +279,18 @@ namespace Portage
                     "parameter mapping in the import window or assign a mapping table with rules for this asset pack.");
             }
 
-            // The vector parameter that ends up in _BaseColor; like the vector loop below, the last one wins.
-            int tintIndex = -1;
+            // The vector parameters that can end up in _BaseColor; like the vector loop below, the last one
+            // wins. The tint multiplies the base color texture, the constant replaces it.
+            int tintIndex = -1, constantIndex = -1;
             for (int i = 0; i < entry.vectorParameters.Count; i++)
             {
                 VectorDecision decision = resolution.Vectors[i];
-                if (decision.IsMapped && decision.Property == "_BaseColor")
+                if (!decision.IsMapped || decision.Property != "_BaseColor")
+                    continue;
+
+                if (decision.Constant)
+                    constantIndex = i;
+                else
                     tintIndex = i;
             }
 
@@ -274,8 +350,18 @@ namespace Portage
             if (baseMap == null && baseTexture != null)
                 baseMap = ImportAndLoad(baseTexture);
 
+            // Without a base color texture the constant is the base color, and the tint has nothing to tint.
+            bool useConstant = constantIndex >= 0 && baseTexture == null;
+            if (useConstant)
+            {
+                _report.Info("baseColor.constant", entry.id,
+                    $"{entry.name}: no base color texture is used, so the constant " +
+                    $"'{entry.vectorParameters[constantIndex].name}' is the base color.");
+            }
+
             // Scalars are collected first because the mask packing depends on them.
             var scalars = new Dictionary<string, float>();
+            bool smoothnessGuessed = false;
             for (int i = 0; i < entry.scalarParameters.Count; i++)
             {
                 PortageManifest.ScalarParameter parameter = entry.scalarParameters[i];
@@ -289,7 +375,12 @@ namespace Portage
                 if (decision.IsIgnored)
                     continue;
 
-                if (decision.Source == MappingSource.Guess)
+                bool guessed = decision.Source == MappingSource.Guess;
+                if (decision.Property == PortageMappingTable.EmissionIntensityProperty &&
+                    EmissionOff(entry, resolution, $"scalar parameter '{parameter.name}'", guessed))
+                    continue;
+
+                if (guessed)
                 {
                     ReportGuessed(entry, "scalar", parameter.name,
                         decision.Conversion == ScalarConversion.OneMinus
@@ -297,8 +388,19 @@ namespace Portage
                             : decision.Property);
                 }
 
+                if (decision.Property == "_Smoothness")
+                    smoothnessGuessed = guessed;
+
                 float value = decision.Conversion == ScalarConversion.OneMinus ? 1f - parameter.value : parameter.value;
                 scalars[decision.Property] = value;
+            }
+
+            // Not a shader property: it scales the emission color below.
+            float emissionIntensity = 1f;
+            if (scalars.TryGetValue(PortageMappingTable.EmissionIntensityProperty, out float intensity))
+            {
+                emissionIntensity = intensity;
+                scalars.Remove(PortageMappingTable.EmissionIntensityProperty);
             }
 
             SetTexture(entry, material, "_BaseMap", baseMap);
@@ -327,7 +429,8 @@ namespace Portage
                     // _Smoothness keeps carrying the scalar.
                     if (recipe.Smoothness != null)
                     {
-                        if (scalars.ContainsKey("_Smoothness"))
+                        // A guessed scalar is expected to lose against the texture and is not worth a line.
+                        if (scalars.ContainsKey("_Smoothness") && !smoothnessGuessed)
                         {
                             _report.Info("smoothness.scalarIgnored", entry.id,
                                 $"{entry.name}: a smoothness texture is used, so the smoothness scalar parameter is ignored.");
@@ -341,10 +444,28 @@ namespace Portage
             foreach (KeyValuePair<string, float> scalar in scalars)
                 SetFloat(entry, material, scalar.Key, scalar.Value);
 
+            if (emissionMap == null && emissionChannel != null)
+            {
+                string emissionPath = _textures.BuildEmissionMap(emissionChannel, emissionChannelName);
+                emissionMap = emissionPath != null ? AssetDatabase.LoadAssetAtPath<Texture2D>(emissionPath) : null;
+            }
+
             if (emissionMap != null)
             {
                 SetTexture(entry, material, "_EmissionMap", emissionMap);
                 SetColor(entry, material, "_EmissionColor", Color.white);
+            }
+
+            // The switches say emission is masked by a texture. Without that texture the color alone would
+            // make the whole surface glow, so no emission is the smaller error.
+            bool emissionTextureMissing = emissionMap == null && resolution.IsOn(SwitchRole.Emission) &&
+                                          resolution.IsOn(SwitchRole.EmissionTexture);
+            if (emissionTextureMissing)
+            {
+                _report.Warning("emission.textureMissing", entry.id,
+                    $"{entry.name}: the switch '{resolution.SwitchWith(SwitchRole.EmissionTexture).Parameter}' says " +
+                    "emission uses a texture, but no emission texture or mask channel is mapped, so the material " +
+                    "was left without emission. Map one in the import window.");
             }
 
             for (int i = 0; i < entry.vectorParameters.Count; i++)
@@ -360,11 +481,39 @@ namespace Portage
                 if (decision.IsIgnored)
                     continue;
 
-                if (decision.Source == MappingSource.Guess)
-                    ReportGuessed(entry, "vector", parameter.name, decision.Property);
+                bool guessed = decision.Source == MappingSource.Guess;
+                if (decision.Property == "_EmissionColor" &&
+                    EmissionOff(entry, resolution, $"vector parameter '{parameter.name}'", guessed))
+                    continue;
+
+                if (guessed)
+                {
+                    ReportGuessed(entry, "vector", parameter.name,
+                        decision.Constant ? decision.Property + " (without texture)" : decision.Property);
+                }
 
                 Color value = i == tintIndex && baseColorOverride.HasValue ? baseColorOverride.Value : parameter.ToColor();
+                if (decision.Property == "_BaseColor")
+                {
+                    // Only one of the tint and the constant is in effect.
+                    if (decision.Constant != useConstant)
+                        continue;
+
+                    // The alpha of a constant is not an opacity.
+                    if (useConstant)
+                        value.a = 1f;
+                }
+                else if (decision.Property == "_EmissionColor" && emissionTextureMissing)
+                    continue;
+
                 SetColor(entry, material, decision.Property, ToPropertySpace(material, decision.Property, value));
+            }
+
+            if (emissionIntensity != 1f && material.HasProperty("_EmissionColor"))
+            {
+                Color emission = material.GetColor("_EmissionColor");
+                material.SetColor("_EmissionColor",
+                    new Color(emission.r * emissionIntensity, emission.g * emissionIntensity, emission.b * emissionIntensity, emission.a));
             }
 
             if (material.HasProperty("_EmissionColor") && material.GetColor("_EmissionColor").maxColorComponent > 0f)
@@ -453,6 +602,46 @@ namespace Portage
         {
             _report.Info("parameter.guessed", entry.id,
                 $"Material '{entry.name}': {kind} parameter '{parameterName}' was guessed as {what}. Review it in the import window.");
+        }
+
+        // True, with a report entry, when a switch with one of the roles is off in this material. A material
+        // without a switch for a role is not affected by it.
+        bool SwitchedOff(PortageManifest.MaterialEntry entry, PortageMappingResolution resolution, string what,
+            params SwitchRole[] roles)
+        {
+            foreach (SwitchRole role in roles)
+            {
+                SwitchDecision decision = resolution.SwitchWith(role);
+                if (decision == null || decision.Value)
+                    continue;
+
+                ReportSwitched(entry, what, decision);
+                return true;
+            }
+
+            return false;
+        }
+
+        // Like SwitchedOff for the emission switch and the given further roles. Emission is only guessed
+        // for materials that have the switch, so a guess that the switch turns off again is not reported.
+        bool EmissionOff(PortageManifest.MaterialEntry entry, PortageMappingResolution resolution, string what,
+            bool guessed, params SwitchRole[] roles)
+        {
+            if (resolution.IsOff(SwitchRole.Emission))
+            {
+                if (!guessed)
+                    ReportSwitched(entry, what, resolution.SwitchWith(SwitchRole.Emission));
+                return true;
+            }
+
+            return SwitchedOff(entry, resolution, what, roles);
+        }
+
+        void ReportSwitched(PortageManifest.MaterialEntry entry, string what, SwitchDecision decision)
+        {
+            _report.Info("parameter.switchedOff", entry.id,
+                $"Material '{entry.name}': {what} was not used because the switch '{decision.Parameter}' is " +
+                $"{(decision.Value ? "on" : "off")}.");
         }
 
         void ReportDuplicate(PortageManifest.MaterialEntry entry, string parameterName, TextureUsage usage)

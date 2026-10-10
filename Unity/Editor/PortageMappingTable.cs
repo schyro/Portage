@@ -40,6 +40,49 @@ namespace Portage
         Roughness,
         Smoothness,
         Occlusion,
+
+        /// <summary>
+        /// An emissive mask. URP Lit reads emission from its own texture, so the channel is copied into a
+        /// grayscale emission map. Assets serialize the ints, so new members go last.
+        /// </summary>
+        Emission,
+    }
+
+    /// <summary>
+    /// What a static switch parameter turns on in the Unreal material. A switch with a role that is off in a
+    /// material keeps the inputs it controls out of the generated material.
+    /// </summary>
+    public enum SwitchRole
+    {
+        /// <summary>The switch has no effect on the conversion. Assets serialize the ints, so never reorder members.</summary>
+        None,
+
+        /// <summary>On: base color comes from the texture. Off: from the base color constant.</summary>
+        BaseColorTexture,
+
+        /// <summary>On: metallic comes from a texture channel. Off: from the metallic scalar.</summary>
+        MetallicTexture,
+
+        /// <summary>On: roughness or smoothness comes from a texture channel. Off: from the scalar.</summary>
+        RoughnessTexture,
+
+        /// <summary>On: the normal map is used.</summary>
+        NormalTexture,
+
+        /// <summary>On: the occlusion channel is used. It is still only applied when ambient occlusion is enabled for the import.</summary>
+        Occlusion,
+
+        /// <summary>On: the color mask limits the base color tint.</summary>
+        ColorMask,
+
+        /// <summary>On: the material is emissive. Emission is only guessed for materials that have a switch with this role.</summary>
+        Emission,
+
+        /// <summary>On: emission is multiplied by a texture. Off: the emission color alone is used.</summary>
+        EmissionTexture,
+
+        /// <summary>On: the emission texture is its own texture parameter. Off: it is a channel of a mask texture.</summary>
+        SeparateEmissionTexture,
     }
 
     /// <summary>How a scalar parameter value is converted before it is written to the material.</summary>
@@ -58,6 +101,12 @@ namespace Portage
     [CreateAssetMenu(fileName = "PortageMappingTable", menuName = "Portage/Mapping Table")]
     public sealed class PortageMappingTable : ScriptableObject
     {
+        /// <summary>
+        /// Not a shader property: a scalar mapped to this name multiplies <c>_EmissionColor</c>, because URP Lit
+        /// has no separate emission intensity.
+        /// </summary>
+        public const string EmissionIntensityProperty = "_EmissionIntensity";
+
         [Serializable]
         public sealed class TextureRule
         {
@@ -99,6 +148,19 @@ namespace Portage
 
             [Tooltip("Color property of the target shader, for example _BaseColor.")]
             public string property = "";
+
+            [Tooltip("The value replaces the texture of this input and is only used when the material has none, for example a base color constant.")]
+            public bool constant;
+        }
+
+        [Serializable]
+        public sealed class SwitchRule
+        {
+            [Tooltip("Unreal static switch parameter names this rule applies to. Case-insensitive.")]
+            public List<string> parameterNames = new List<string>();
+
+            [Tooltip("What the switch turns on in the Unreal material.")]
+            public SwitchRole role;
         }
 
         [Tooltip("Flip the green channel of normal maps. Unreal uses the DirectX convention, Unity the OpenGL one, so this is normally on.")]
@@ -107,6 +169,7 @@ namespace Portage
         public List<TextureRule> textureRules = new List<TextureRule>();
         public List<ScalarRule> scalarRules = new List<ScalarRule>();
         public List<VectorRule> vectorRules = new List<VectorRule>();
+        public List<SwitchRule> switchRules = new List<SwitchRule>();
 
         /// <summary>Creates an in-memory table holding the default rules.</summary>
         public static PortageMappingTable CreateDefault()
@@ -132,6 +195,12 @@ namespace Portage
         public VectorRule FindVectorRule(string parameterName)
         {
             return vectorRules.Find(r => Contains(r.parameterNames, parameterName));
+        }
+
+        /// <summary>Returns the rule for a static switch parameter name, or null.</summary>
+        public SwitchRule FindSwitchRule(string parameterName)
+        {
+            return switchRules.Find(r => Contains(r.parameterNames, parameterName));
         }
 
         /// <summary>Replaces all rules with the defaults for the common Unreal conventions.</summary>
@@ -164,6 +233,9 @@ namespace Portage
                 Vector("_BaseColor", "BaseColor", "Base Color", "Tint", "Color", "BaseColorTint"),
                 Vector("_EmissionColor", "EmissiveColor", "Emissive", "Emission"),
             };
+
+            // Switch names differ too much between packs for default rules; their roles are guessed.
+            switchRules = new List<SwitchRule>();
         }
 
         void Reset()

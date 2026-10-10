@@ -4,7 +4,7 @@
     "name": "Portage",
     "version": "0.1.0",
     "engineVersion": "5.8.3",
-    "exportedAt": "2026-10-09T21:09:51Z"
+    "exportedAt": "2026-10-10T11:47:50Z"
   },
   "meshes": [
     {
@@ -71,6 +71,16 @@
           "texture": "/Game/PortageTest/T_Block_ORM.T_Block_ORM"
         }
       ],
+      "staticSwitchParameters": [
+        {
+          "name": "Use Tint",
+          "value": true
+        },
+        {
+          "name": "Use Normal",
+          "value": true
+        }
+      ],
       "convertible": true
     },
     {
@@ -86,6 +96,7 @@
       "scalarParameters": [],
       "vectorParameters": [],
       "textureParameters": [],
+      "staticSwitchParameters": [],
       "convertible": false
     }
   ],

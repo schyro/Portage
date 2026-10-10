@@ -132,6 +132,7 @@ class _Export:
             "scalarParameters": [],
             "vectorParameters": [],
             "textureParameters": [],
+            "staticSwitchParameters": [],
             "convertible": True,
         }
         # Registered before the parameters are read so the id is reserved.
@@ -162,6 +163,15 @@ class _Export:
             entry["textureParameters"].append(
                 {"name": str(parameter), "texture": self.add_texture(texture) if texture else ""}
             )
+
+        # Parameters behind a switch that is off are still listed above, so the importer needs the
+        # switch values to know which of them the material really uses.
+        for parameter in library.get_static_switch_parameter_names(material):
+            if is_instance:
+                enabled = library.get_material_instance_static_switch_parameter_value(material, parameter)
+            else:
+                enabled = library.get_material_default_static_switch_parameter_value(material, parameter)
+            entry["staticSwitchParameters"].append({"name": str(parameter), "value": bool(enabled)})
 
         if entry["shadingModel"] != "defaultLit":
             self.issue(

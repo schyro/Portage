@@ -5,7 +5,9 @@ Run headless from the project that has the Portage plugin enabled:
     UnrealEditor-Cmd.exe <Project>.uproject -run=pythonscript -script=<this file> -unattended -nullrhi
 
 Everything is created by this script under /Game/PortageTest: textures, a parameterised master
-material with an instance, a material without parameters and an asymmetric box mesh. The export
+material with an instance, a material without parameters and an asymmetric box mesh. The content
+is deleted and rebuilt on every run, so do not run it against a project that is open in the
+editor; an empty project with the plugin enabled is enough. The export
 goes to <Project>/Saved/PortageTest/Block (or the folder in the PORTAGE_TEST_OUT environment
 variable). A result.json next to the manifest records what Unreal reports about the content, so
 the Unity side can be compared against it. A traceback.txt is written instead if the run fails.
@@ -115,6 +117,14 @@ def texture_parameter(material, name, texture, sampler, y):
     return node
 
 
+def static_switch(material, name, default, x, y):
+    library = unreal.MaterialEditingLibrary
+    node = library.create_material_expression(material, unreal.MaterialExpressionStaticSwitchParameter, x, y)
+    node.set_editor_property("parameter_name", name)
+    node.set_editor_property("default_value", default)
+    return node
+
+
 def build_master_material(base, normal_map, mask):
     library = unreal.MaterialEditingLibrary
     material = create_asset("M_Prop", unreal.Material, unreal.MaterialFactoryNew())
@@ -126,10 +136,20 @@ def build_master_material(base, normal_map, mask):
     multiply = library.create_material_expression(material, unreal.MaterialExpressionMultiply, -300, -100)
     library.connect_material_expressions(color, "RGB", multiply, "A")
     library.connect_material_expressions(tint, "", multiply, "B")
-    library.connect_material_property(multiply, "", unreal.MaterialProperty.MP_BASE_COLOR)
+
+    # One switch the instance overrides and one it inherits, to check both are read correctly.
+    use_tint = static_switch(material, "Use Tint", False, 0, -100)
+    library.connect_material_expressions(multiply, "", use_tint, "True")
+    library.connect_material_expressions(color, "RGB", use_tint, "False")
+    library.connect_material_property(use_tint, "", unreal.MaterialProperty.MP_BASE_COLOR)
 
     normal_node = texture_parameter(material, "Normal", normal_map, unreal.MaterialSamplerType.SAMPLERTYPE_NORMAL, 300)
-    library.connect_material_property(normal_node, "RGB", unreal.MaterialProperty.MP_NORMAL)
+    flat = library.create_material_expression(material, unreal.MaterialExpressionConstant3Vector, -600, 450)
+    flat.set_editor_property("constant", unreal.LinearColor(0.0, 0.0, 1.0, 0.0))
+    use_normal = static_switch(material, "Use Normal", True, 0, 300)
+    library.connect_material_expressions(normal_node, "RGB", use_normal, "True")
+    library.connect_material_expressions(flat, "", use_normal, "False")
+    library.connect_material_property(use_normal, "", unreal.MaterialProperty.MP_NORMAL)
 
     mask_node = texture_parameter(material, "ORM", mask, unreal.MaterialSamplerType.SAMPLERTYPE_MASKS, 600)
     library.connect_material_property(mask_node, "R", unreal.MaterialProperty.MP_AMBIENT_OCCLUSION)
@@ -154,6 +174,7 @@ def build_instance(parent):
     library.set_material_instance_parent(instance, parent)
     library.set_material_instance_scalar_parameter_value(instance, "WetnessAmount", 0.25)
     library.set_material_instance_vector_parameter_value(instance, "Tint", unreal.LinearColor(1.0, 0.9, 0.8, 1.0))
+    library.set_material_instance_static_switch_parameter_value(instance, "Use Tint", True)
 
     overrides = instance.get_editor_property("base_property_overrides")
     overrides.set_editor_property("override_two_sided", True)
@@ -239,6 +260,14 @@ def main():
             [str(m.get_editor_property("material_slot_name")), m.get_editor_property("material_interface").get_name()]
             for m in mesh.get_editor_property("static_materials")
         ],
+        "switches": {
+            str(name): bool(unreal.MaterialEditingLibrary.get_material_instance_static_switch_parameter_value(instance, name))
+            for name in unreal.MaterialEditingLibrary.get_static_switch_parameter_names(instance)
+        },
+        "masterSwitches": {
+            str(name): bool(unreal.MaterialEditingLibrary.get_material_default_static_switch_parameter_value(master, name))
+            for name in unreal.MaterialEditingLibrary.get_static_switch_parameter_names(master)
+        },
         "meshes": len(manifest["meshes"]),
         "materials": len(manifest["materials"]),
         "textures": len(manifest["textures"]),

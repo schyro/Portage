@@ -44,7 +44,7 @@ You can export into the same folder again. Mapping choices made in Unity
 | | |
 | --- | --- |
 | Static meshes | FBX, from the source mesh data of LOD 0, with vertex colors. No collision, no extra LODs. |
-| Materials | As data, not baked: blend mode, shading model, two-sided flag and the scalar, vector and texture parameter values in effect for the material or instance. |
+| Materials | As data, not baked: blend mode, shading model, two-sided flag and the scalar, vector, texture and static switch parameter values in effect for the material or instance. |
 | Textures | Every 2D texture assigned to a texture parameter, as PNG. |
 
 A material that exposes no parameters cannot be read this way, because its textures and
@@ -67,7 +67,7 @@ dictionary, including its `issues` list.
 - Only static meshes. Skeletal meshes, animations and levels are planned.
 - HDR, 16-bit and virtual textures have not been tested and may fail to export or lose
   precision.
-- Static switch parameters are not exported.
+- Static component mask parameters are not exported.
 
 ## Only export content you may use outside Unreal
 
@@ -75,9 +75,11 @@ See [Content licensing](../README.md#content-licensing) in the main README.
 
 ## For contributors
 
-`Tests/run_export_test.py` builds self-made test content in the open project (textures, a
-master material with an instance, a material without parameters and an asymmetric box), exports
-it and writes a `result.json` with what Unreal reports about it. Run it headless:
+`Tests/run_export_test.py` builds self-made test content in a project (textures, a master
+material with an instance, a material without parameters and an asymmetric box), exports it and
+writes a `result.json` with what Unreal reports about it. It deletes and rebuilds
+`/Game/PortageTest` on every run, so use a project that is not open in the editor; an empty one
+with the plugin enabled is enough. Run it headless:
 
 ```
 UnrealEditor-Cmd.exe <Project>.uproject -run=pythonscript -script=<repo>/Unreal/Tests/run_export_test.py -unattended -nullrhi

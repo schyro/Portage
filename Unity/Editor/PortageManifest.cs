@@ -63,6 +63,10 @@ namespace Portage
             public List<ScalarParameter> scalarParameters = new List<ScalarParameter>();
             public List<VectorParameter> vectorParameters = new List<VectorParameter>();
             public List<TextureParameter> textureParameters = new List<TextureParameter>();
+
+            /// <summary>Empty for manifests written before static switches were exported.</summary>
+            public List<StaticSwitchParameter> staticSwitchParameters = new List<StaticSwitchParameter>();
+
             public bool convertible;
         }
 
@@ -92,6 +96,13 @@ namespace Portage
         {
             public string name = "";
             public string texture = "";
+        }
+
+        [Serializable]
+        public sealed class StaticSwitchParameter
+        {
+            public string name = "";
+            public bool value;
         }
 
         [Serializable]

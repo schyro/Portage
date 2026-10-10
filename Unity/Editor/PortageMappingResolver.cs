@@ -48,8 +48,27 @@ namespace Portage
         public MappingSource Source;
         public string Property = "";
 
+        /// <summary>The value replaces the texture of the input and is only used when the material has none.</summary>
+        public bool Constant;
+
         public bool IsMapped => Source != MappingSource.None;
         public bool IsIgnored => IsMapped && string.IsNullOrEmpty(Property);
+    }
+
+    /// <summary>
+    /// The final decision for one static switch parameter. The role is shared by every material of a base
+    /// material; the value is the one of this material.
+    /// </summary>
+    public sealed class SwitchDecision
+    {
+        public string Parameter = "";
+        public MappingSource Source;
+        public SwitchRole Role;
+
+        /// <summary>Whether the switch is on in this material.</summary>
+        public bool Value;
+
+        public bool IsMapped => Source != MappingSource.None;
     }
 
     /// <summary>
@@ -61,21 +80,45 @@ namespace Portage
         public readonly List<TextureDecision> Textures = new List<TextureDecision>();
         public readonly List<ScalarDecision> Scalars = new List<ScalarDecision>();
         public readonly List<VectorDecision> Vectors = new List<VectorDecision>();
+        public readonly List<SwitchDecision> Switches = new List<SwitchDecision>();
 
         public TextureDecision FindTexture(string parameter) => Textures.Find(d => d.Parameter == parameter);
         public ScalarDecision FindScalar(string parameter) => Scalars.Find(d => d.Parameter == parameter);
         public VectorDecision FindVector(string parameter) => Vectors.Find(d => d.Parameter == parameter);
+        public SwitchDecision FindSwitch(string parameter) => Switches.Find(d => d.Parameter == parameter);
+
+        /// <summary>Returns the switch that has the role, or null. A material without it behaves as before switches existed.</summary>
+        public SwitchDecision SwitchWith(SwitchRole role)
+        {
+            return role == SwitchRole.None ? null : Switches.Find(d => d.IsMapped && d.Role == role);
+        }
+
+        /// <summary>True when a switch has the role and is on in this material.</summary>
+        public bool IsOn(SwitchRole role)
+        {
+            SwitchDecision decision = SwitchWith(role);
+            return decision != null && decision.Value;
+        }
+
+        /// <summary>True when a switch has the role and is off in this material.</summary>
+        public bool IsOff(SwitchRole role)
+        {
+            SwitchDecision decision = SwitchWith(role);
+            return decision != null && !decision.Value;
+        }
     }
 
     /// <summary>
     /// Applies the precedence of Docs/mapping-format.md: sidecar, then mapping table, then guess. A guess never
     /// takes an input that a sidecar entry or a table rule already assigned for the same material.
+    /// Decisions depend on the names of the parameters and switches only, so every material of a base material
+    /// gets the same ones; the switch values of a material are applied when its material is built.
     /// </summary>
     public static class PortageMappingResolver
     {
         sealed class Taken
         {
-            public bool BaseColor, Normal, ColorMask, Metallic, Smoothness, Occlusion;
+            public bool BaseColor, Normal, ColorMask, EmissionTexture, Metallic, Smoothness, Occlusion;
             public readonly HashSet<string> ScalarProperties = new HashSet<string>();
             public readonly HashSet<string> VectorProperties = new HashSet<string>();
         }
@@ -88,6 +131,9 @@ namespace Portage
             var resolution = new PortageMappingResolution();
             var taken = new Taken();
             string key = PortageMappingFile.KeyOf(entry);
+
+            // Switches first: their roles decide which guesses are made for the other parameters.
+            ISet<SwitchRole> roles = ResolveSwitches(entry, key, table, file, resolution);
 
             // Sources 1 and 2.
             foreach (PortageManifest.TextureParameter parameter in entry.textureParameters)
@@ -111,7 +157,7 @@ namespace Portage
                 VectorDecision decision = ResolveStoredVector(key, parameter.name, table, file);
                 resolution.Vectors.Add(decision);
                 if (decision.IsMapped && !string.IsNullOrEmpty(decision.Property))
-                    taken.VectorProperties.Add(decision.Property);
+                    taken.VectorProperties.Add(VectorSlot(decision.Property, decision.Constant));
             }
 
             // Source 3.
@@ -122,7 +168,7 @@ namespace Portage
                     decided.Add(decision.Parameter);
             }
 
-            PortageMappingGuesser.Result guesses = PortageMappingGuesser.Guess(entry, manifest, decided);
+            PortageMappingGuesser.Result guesses = PortageMappingGuesser.Guess(entry, manifest, decided, roles);
 
             foreach (TextureDecision decision in resolution.Textures)
             {
@@ -148,14 +194,64 @@ namespace Portage
             foreach (VectorDecision decision in resolution.Vectors)
             {
                 PortageMappingGuesser.VectorGuess guess = decision.IsMapped ? null : guesses.FindVector(decision.Parameter);
-                if (guess == null || !taken.VectorProperties.Add(guess.Property))
+                if (guess == null || !taken.VectorProperties.Add(VectorSlot(guess.Property, guess.Constant)))
                     continue;
 
                 decision.Source = MappingSource.Guess;
                 decision.Property = guess.Property;
+                decision.Constant = guess.Constant;
             }
 
             return resolution;
+        }
+
+        // A constant and a tint can both target one property: only one of them is in effect per material.
+        static string VectorSlot(string property, bool constant)
+        {
+            return constant ? property + "|constant" : property;
+        }
+
+        // Fills resolution.Switches and returns the roles the switches of the material have.
+        static ISet<SwitchRole> ResolveSwitches(PortageManifest.MaterialEntry entry, string key,
+            PortageMappingTable table, PortageMappingFile file, PortageMappingResolution resolution)
+        {
+            var roles = new HashSet<SwitchRole>();
+            var decided = new HashSet<string>();
+            foreach (PortageManifest.StaticSwitchParameter parameter in entry.staticSwitchParameters)
+            {
+                var decision = new SwitchDecision { Parameter = parameter.name, Value = parameter.value };
+                resolution.Switches.Add(decision);
+
+                PortageMappingFile.SwitchChoice choice = file?.FindSwitch(key, parameter.name);
+                PortageMappingTable.SwitchRule rule = table != null ? table.FindSwitchRule(parameter.name) : null;
+                if (choice != null && PortageMappingFile.TryParseEnum(choice.role, out SwitchRole role))
+                {
+                    decision.Source = MappingSource.Saved;
+                    decision.Role = role;
+                }
+                else if (rule != null)
+                {
+                    decision.Source = MappingSource.Table;
+                    decision.Role = rule.role;
+                }
+                else
+                    continue;
+
+                decided.Add(parameter.name);
+                // A role belongs to one switch; a later switch that claims it again is left without a role.
+                if (decision.Role != SwitchRole.None && !roles.Add(decision.Role))
+                    decision.Role = SwitchRole.None;
+            }
+
+            foreach (PortageMappingGuesser.SwitchGuess guess in PortageMappingGuesser.GuessSwitches(entry, decided, roles))
+            {
+                SwitchDecision decision = resolution.FindSwitch(guess.Parameter);
+                decision.Source = MappingSource.Guess;
+                decision.Role = guess.Role;
+                roles.Add(guess.Role);
+            }
+
+            return roles;
         }
 
         static TextureDecision ResolveStoredTexture(string key, string parameter, PortageMappingTable table,
@@ -224,6 +320,7 @@ namespace Portage
             {
                 decision.Source = MappingSource.Saved;
                 decision.Property = choice.property ?? "";
+                decision.Constant = choice.constant && !string.IsNullOrEmpty(decision.Property);
                 return decision;
             }
 
@@ -232,6 +329,7 @@ namespace Portage
             {
                 decision.Source = MappingSource.Table;
                 decision.Property = rule.property ?? "";
+                decision.Constant = rule.constant && !string.IsNullOrEmpty(decision.Property);
             }
 
             return decision;
@@ -251,6 +349,10 @@ namespace Portage
                     break;
                 case TextureUsage.ColorMask:
                     if (taken.ColorMask)
+                        return;
+                    break;
+                case TextureUsage.Emission:
+                    if (taken.EmissionTexture)
                         return;
                     break;
                 case TextureUsage.Mask:
@@ -315,6 +417,9 @@ namespace Portage
                     break;
                 case TextureUsage.ColorMask:
                     taken.ColorMask = true;
+                    break;
+                case TextureUsage.Emission:
+                    taken.EmissionTexture = true;
                     break;
                 case TextureUsage.Mask:
                     foreach (MaskChannel channel in new[] { decision.Red, decision.Green, decision.Blue, decision.Alpha })

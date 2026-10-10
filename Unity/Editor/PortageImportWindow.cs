@@ -21,7 +21,20 @@ namespace Portage
             TextureUsage.ColorMask,
         };
 
-        static readonly string[] VectorProperties = { "_BaseColor", "_EmissionColor" };
+        static readonly VectorOption[] VectorOptions =
+        {
+            new VectorOption("(ignore)", "", false),
+            new VectorOption("_BaseColor", "_BaseColor", false),
+            new VectorOption("_BaseColor (without texture)", "_BaseColor", true),
+            new VectorOption("_EmissionColor", "_EmissionColor", false),
+        };
+
+        static readonly SwitchRole[] RoleOptions =
+        {
+            SwitchRole.None, SwitchRole.BaseColorTexture, SwitchRole.MetallicTexture, SwitchRole.RoughnessTexture,
+            SwitchRole.NormalTexture, SwitchRole.Occlusion, SwitchRole.ColorMask, SwitchRole.Emission,
+            SwitchRole.EmissionTexture, SwitchRole.SeparateEmissionTexture,
+        };
 
         static readonly ScalarOption[] ScalarOptions =
         {
@@ -32,6 +45,7 @@ namespace Portage
             new ScalarOption("_BumpScale", "_BumpScale", ScalarConversion.None),
             new ScalarOption("_OcclusionStrength", "_OcclusionStrength", ScalarConversion.None),
             new ScalarOption("_Cutoff", "_Cutoff", ScalarConversion.None),
+            new ScalarOption("Emission intensity", PortageMappingTable.EmissionIntensityProperty, ScalarConversion.None),
         };
 
         const string NotMapped = "(not mapped)";
@@ -48,6 +62,20 @@ namespace Portage
                 Label = label;
                 Property = property;
                 Conversion = conversion;
+            }
+        }
+
+        readonly struct VectorOption
+        {
+            public readonly string Label;
+            public readonly string Property;
+            public readonly bool Constant;
+
+            public VectorOption(string label, string property, bool constant)
+            {
+                Label = label;
+                Property = property;
+                Constant = constant;
             }
         }
 
@@ -338,8 +366,15 @@ namespace Portage
             var textures = new List<PortageManifest.TextureParameter>();
             var scalars = new List<PortageManifest.ScalarParameter>();
             var vectors = new List<PortageManifest.VectorParameter>();
+            var switches = new List<string>();
             foreach (PortageManifest.MaterialEntry entry in group.Materials)
             {
+                foreach (PortageManifest.StaticSwitchParameter parameter in entry.staticSwitchParameters)
+                {
+                    if (!switches.Contains(parameter.name))
+                        switches.Add(parameter.name);
+                }
+
                 foreach (PortageManifest.TextureParameter parameter in entry.textureParameters)
                 {
                     int i = textures.FindIndex(p => p.name == parameter.name);
@@ -369,6 +404,10 @@ namespace Portage
             AddSectionHeader(foldout, "Vectors", vectors.Count);
             foreach (PortageManifest.VectorParameter parameter in vectors)
                 AddVectorRow(foldout, group, parameter);
+
+            AddSectionHeader(foldout, "Switches", switches.Count);
+            foreach (string parameter in switches)
+                AddSwitchRow(foldout, group, parameter);
 
             if (scalars.Count > 0)
             {
@@ -523,11 +562,13 @@ namespace Portage
             VisualElement row = NewRow();
             row.Add(NewCell(name, 170));
             row.Add(NewCell(example, 120));
-            var field = new DropdownField(new List<string> { Ignore }, 0) { style = { width = 170, marginRight = 6 } };
+            var field = new DropdownField(new List<string> { Ignore }, 0) { style = { width = 200, marginRight = 6 } };
             row.Add(field);
             Label source = NewSourceLabel();
             row.Add(source);
             parent.Add(row);
+
+            var options = new List<VectorOption>(VectorOptions);
 
             void Refresh()
             {
@@ -539,21 +580,101 @@ namespace Portage
                         break;
                 }
 
-                string property = decision != null && decision.IsMapped ? decision.Property : "";
-                var choices = new List<string> { Ignore };
-                choices.AddRange(VectorProperties);
-                if (!string.IsNullOrEmpty(property) && !choices.Contains(property))
-                    choices.Add(property);
+                options.Clear();
+                options.AddRange(VectorOptions);
 
-                field.choices = choices;
-                field.SetValueWithoutNotify(string.IsNullOrEmpty(property) ? Ignore : property);
+                int selected = 0;
+                if (decision != null && decision.IsMapped && !decision.IsIgnored)
+                {
+                    selected = options.FindIndex(o => o.Property == decision.Property && o.Constant == decision.Constant);
+                    if (selected < 0)
+                    {
+                        // A property from a mapping table or saved file that is not in the standard list.
+                        string label = decision.Constant ? decision.Property + " (without texture)" : decision.Property;
+                        options.Add(new VectorOption(label, decision.Property, decision.Constant));
+                        selected = options.Count - 1;
+                    }
+                }
+
+                var labels = new List<string>();
+                foreach (VectorOption option in options)
+                    labels.Add(option.Label);
+                field.choices = labels;
+                field.SetValueWithoutNotify(labels[selected]);
                 source.text = decision != null ? SourceText(decision.Source) : "";
             }
 
             field.RegisterValueChangedCallback(_ =>
             {
                 int index = IndexOf(field);
-                _mapping.SetVector(group.Key, name, index <= 0 ? "" : field.choices[index]);
+                if (index < 0)
+                    return;
+                VectorOption option = options[index];
+                _mapping.SetVector(group.Key, name, option.Property, option.Constant);
+                OnChoiceChanged(group);
+            });
+
+            group.Refreshers.Add(Refresh);
+            Refresh();
+        }
+
+        void AddSwitchRow(VisualElement parent, Group group, string name)
+        {
+            // The role is shared by the materials of the group, the value is not.
+            int total = 0, on = 0;
+            foreach (PortageManifest.MaterialEntry entry in group.Materials)
+            {
+                PortageManifest.StaticSwitchParameter parameter = entry.staticSwitchParameters.Find(p => p.name == name);
+                if (parameter == null)
+                    continue;
+
+                total++;
+                if (parameter.value)
+                    on++;
+            }
+
+            string state = on == total ? "on" : on == 0 ? "off" : $"on in {on} of {total}";
+
+            VisualElement row = NewRow();
+            row.Add(NewCell(name, 170));
+            row.Add(NewCell(state, 120, "Whether the switch is on in the materials that use this base material."));
+
+            var choices = new List<string> { NotMapped };
+            foreach (SwitchRole role in RoleOptions)
+                choices.Add(role == SwitchRole.None ? Ignore : role.ToString());
+            var field = new DropdownField(choices, 0)
+            {
+                style = { width = 200, marginRight = 6 },
+                tooltip = "What the switch turns on in the Unreal material. A switch with a role that is off keeps " +
+                          "the inputs it controls out of the generated material.",
+            };
+            row.Add(field);
+            Label source = NewSourceLabel();
+            row.Add(source);
+            parent.Add(row);
+
+            void Refresh()
+            {
+                SwitchDecision decision = null;
+                foreach (PortageMappingResolution resolution in group.Resolutions)
+                {
+                    decision = resolution.FindSwitch(name);
+                    if (decision != null)
+                        break;
+                }
+
+                bool mapped = decision != null && decision.IsMapped;
+                field.SetValueWithoutNotify(mapped ? choices[Array.IndexOf(RoleOptions, decision.Role) + 1] : NotMapped);
+                source.text = mapped ? SourceText(decision.Source) : "";
+            }
+
+            field.RegisterValueChangedCallback(_ =>
+            {
+                int index = IndexOf(field);
+                if (index <= 0)
+                    _mapping.RemoveSwitch(group.Key, name);
+                else
+                    _mapping.SetSwitch(group.Key, name, RoleOptions[index - 1]);
                 OnChoiceChanged(group);
             });
 
@@ -569,7 +690,7 @@ namespace Portage
             VisualElement row = NewRow();
             row.Add(NewCell(name, 170));
             row.Add(NewCell(sample.value.ToString("0.###"), 120));
-            var field = new DropdownField(new List<string> { Ignore }, 0) { style = { width = 170, marginRight = 6 } };
+            var field = new DropdownField(new List<string> { Ignore }, 0) { style = { width = 200, marginRight = 6 } };
             row.Add(field);
             Label source = NewSourceLabel();
             row.Add(source);

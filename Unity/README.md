@@ -49,10 +49,45 @@ time you import that folder, and survive exporting again from Unreal.
 **Guesses** compare names without case, spaces or a trailing "Texture" / "Map", so
 `Base Color Texture` is recognised as a base color. Channel-packed masks are recognised from a
 list in the name, such as `ORMA(AO,Rough,Mat,Emis)`, or from an upper-case suffix such as
-`_ORM`, `_ARM` or `_RMA`. A parameter named like `Color_Mask`, `Tint Mask` or `Paint Mask` is guessed as a color mask, even when it holds a placeholder texture such as `T_Gray`; a guessed placeholder is only used when it is one uniform color. Emission maps and engine placeholder textures are otherwise never guessed.
+`_ORM`, `_ARM` or `_RMA`. A parameter named like `Color_Mask`, `Tint Mask` or `Paint Mask` is guessed as a color mask, even when it holds a placeholder texture such as `T_Gray`; a guessed placeholder is only used when it is one uniform color. Engine placeholder textures are otherwise never guessed, and emission is only guessed for a master material that has an emission switch (see below).
 
 **Mapping tables** are optional. Create one with **Assets > Create > Portage > Mapping Table**
 when you want to reuse the same rules across many export folders or share them with a team.
+
+### Switches
+
+Master materials often have static switches such as `Use Normal`, `Metallic Texture Input` or
+`Use Emissive`. Unreal still lists the parameters behind a switch that is off, so without the
+switch a placeholder texture or an unused constant would end up in the material.
+
+The **Switches** section lists the switches of a master material, whether each is on in the
+materials that use it, and its **role**: what it turns on. Roles are guessed from the switch
+name and can be changed like any other choice. The role belongs to the master material, the
+value to each material: two instances with the same mapping can come out differently.
+
+| Role | When the switch is off |
+| --- | --- |
+| BaseColorTexture | The base color texture is not used. A vector mapped to `_BaseColor (without texture)`, such as `Base Color Constant`, is the base color instead. |
+| MetallicTexture | The metallic channel of the mask is not used; the scalar mapped to `_Metallic` applies. |
+| RoughnessTexture | The roughness or smoothness channel is not used; the scalar mapped to `_Smoothness` applies. |
+| NormalTexture | No normal map. |
+| Occlusion | The occlusion channel is not used, even with **Apply ambient occlusion** ticked. On does not apply it by itself. |
+| ColorMask | The color mask is not used, so the tint covers the whole base color texture. |
+| Emission | No emission. |
+| EmissionTexture | Emission is the emission color alone, without a texture. |
+| SeparateEmissionTexture | The emission texture is the `Emission` channel of a mask. On: it is the texture parameter mapped to Emission. |
+
+A switch without a role changes nothing, and a material without switches is converted as before.
+
+Two things are only guessed for a master material that has the matching switch, because the
+switch is what tells the importer whether they are in use:
+
+- **Constants** (`Base Color Constant`, `Metallic Constant`, `Roughness Constant`) need the
+  switch that chooses between the constant and the texture.
+- **Emission** needs a switch with the Emission role: the emissive color goes to
+  `_EmissionColor`, multiplied by a scalar such as `Emissive Intensity`, and the emission
+  texture is a parameter named like `Emissive Texture` or the emissive channel of a packed mask
+  (`ORME`, `ORMA(AO,Rough,Mat,Emis)`), which is copied into its own `<Mask>_Emission.png`.
 
 ### Ambient occlusion
 
@@ -68,7 +103,7 @@ occlusion to all ambient light, which would turn those areas black in shadow.
 | BaseColor | Base map |
 | Normal | Normal map |
 | Emission | Emission map |
-| Mask | Repacked into the metallic / smoothness / occlusion texture. Set what each of R, G, B and A contains; roughness is inverted into smoothness. |
+| Mask | Repacked into the metallic / smoothness / occlusion texture. Set what each of R, G, B and A contains; roughness is inverted into smoothness. A channel set to Emission is copied into a grayscale emission map instead. |
 | Ignore | Not used |
 | ColorMask | Limits the base color tint to the white areas of this texture. Only the red channel is read, so a mask with a separate zone per channel is not supported. The tint is baked into a copy of the base color texture, `<Material>_BaseColor.png`, where tint values above 1 are clamped; with a uniform mask it only scales `_BaseColor`. Needs a base color texture and a vector parameter mapped to `_BaseColor`: without a base color texture the tint covers the whole surface. |
 
@@ -90,6 +125,10 @@ and is listed in the report.
 
 - Anything a master material computes in its graph is lost: dirt and dust layers, detail
   normals, tiling, multipliers on roughness. The result is the plain PBR surface.
+- What a switch controls is taken from its name, not from the material graph. Check the roles
+  of an unfamiliar master material in the import window.
+- Opacity from a constant or a separate texture is not converted; the alpha of the base color
+  texture is used.
 - Two materials with the same asset name in different Unreal folders overwrite each other.
 - Packed masks can only be read from PNG or JPG files.
 - Lower-case packed suffixes such as `_Arm` are not guessed; pick the usage by hand.

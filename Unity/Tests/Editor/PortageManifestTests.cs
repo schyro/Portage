@@ -39,5 +39,46 @@ namespace Portage.Tests
         {
             Assert.Throws<PortageManifestException>(() => PortageManifest.Parse("{ not json"));
         }
+
+        [Test]
+        public void StaticSwitchParameters_AreParsed()
+        {
+            PortageManifest manifest = PortageManifest.Parse(
+                "{\"formatVersion\":1,\"materials\":[{\"id\":\"/Game/Test/MI_A.MI_A\",\"name\":\"MI_A\"," +
+                "\"staticSwitchParameters\":[{\"name\":\"Use Normal\",\"value\":true}," +
+                "{\"name\":\"Use Emissive\",\"value\":false}]}]}");
+
+            var switches = manifest.materials[0].staticSwitchParameters;
+            Assert.AreEqual(2, switches.Count);
+            Assert.AreEqual("Use Normal", switches[0].name);
+            Assert.IsTrue(switches[0].value);
+            Assert.AreEqual("Use Emissive", switches[1].name);
+            Assert.IsFalse(switches[1].value);
+        }
+
+        [Test]
+        public void MissingStaticSwitchParameters_GiveAnEmptyList()
+        {
+            PortageManifest manifest = PortageManifest.Parse(
+                "{\"formatVersion\":1,\"materials\":[{\"id\":\"/Game/Test/MI_A.MI_A\",\"name\":\"MI_A\"}]}");
+
+            Assert.IsNotNull(manifest.materials[0].staticSwitchParameters);
+            Assert.AreEqual(0, manifest.materials[0].staticSwitchParameters.Count);
+        }
+
+        [Test]
+        public void BlockFixture_HasStaticSwitches()
+        {
+            string path = Path.Combine(Path.GetDirectoryName(FixturePath), "Block", "manifest.json");
+            PortageManifest manifest = PortageManifest.Load(path);
+
+            PortageManifest.MaterialEntry block = manifest.materials.Find(m => m.name == "MI_Block");
+            Assert.IsNotNull(block);
+            Assert.AreEqual(2, block.staticSwitchParameters.Count);
+            Assert.AreEqual("Use Tint", block.staticSwitchParameters[0].name);
+            Assert.IsTrue(block.staticSwitchParameters[0].value);
+            Assert.AreEqual("Use Normal", block.staticSwitchParameters[1].name);
+            Assert.IsTrue(block.staticSwitchParameters[1].value);
+        }
     }
 }

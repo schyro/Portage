@@ -38,6 +38,7 @@ namespace Portage
             public List<TextureChoice> textures = new List<TextureChoice>();
             public List<ScalarChoice> scalars = new List<ScalarChoice>();
             public List<VectorChoice> vectors = new List<VectorChoice>();
+            public List<SwitchChoice> switches = new List<SwitchChoice>();
         }
 
         [Serializable]
@@ -64,6 +65,16 @@ namespace Portage
         {
             public string parameter = "";
             public string property = "";
+
+            /// <summary>The value replaces the texture of this input and is only used when the material has none.</summary>
+            public bool constant;
+        }
+
+        [Serializable]
+        public sealed class SwitchChoice
+        {
+            public string parameter = "";
+            public string role = "None";
         }
 
         /// <summary>The key choices are stored under: the base material id, or the material id when it has none.</summary>
@@ -111,6 +122,8 @@ namespace Portage
 
             file.version = SupportedFormatVersion;
             file.materials = file.materials ?? new List<MaterialChoices>();
+            foreach (MaterialChoices material in file.materials)
+                material.switches = material.switches ?? new List<SwitchChoice>();
             return file;
         }
 
@@ -149,6 +162,11 @@ namespace Portage
             return FindMaterial(key)?.vectors.Find(c => c.parameter == parameter);
         }
 
+        public SwitchChoice FindSwitch(string key, string parameter)
+        {
+            return FindMaterial(key)?.switches.Find(c => c.parameter == parameter);
+        }
+
         public void SetTexture(string key, string parameter, TextureUsage usage, MaskChannel red = MaskChannel.None,
             MaskChannel green = MaskChannel.None, MaskChannel blue = MaskChannel.None, MaskChannel alpha = MaskChannel.None)
         {
@@ -184,7 +202,8 @@ namespace Portage
         }
 
         /// <summary>Stores a vector choice. An empty property means the parameter is ignored.</summary>
-        public void SetVector(string key, string parameter, string property)
+        /// <param name="constant">The value is only used when the input has no texture.</param>
+        public void SetVector(string key, string parameter, string property, bool constant = false)
         {
             MaterialChoices material = GetOrAdd(key);
             VectorChoice choice = material.vectors.Find(c => c.parameter == parameter);
@@ -195,6 +214,26 @@ namespace Portage
             }
 
             choice.property = property ?? "";
+            choice.constant = constant && !string.IsNullOrEmpty(property);
+        }
+
+        /// <summary>Stores the role of a static switch. <see cref="SwitchRole.None"/> means the switch is ignored.</summary>
+        public void SetSwitch(string key, string parameter, SwitchRole role)
+        {
+            MaterialChoices material = GetOrAdd(key);
+            SwitchChoice choice = material.switches.Find(c => c.parameter == parameter);
+            if (choice == null)
+            {
+                choice = new SwitchChoice { parameter = parameter };
+                material.switches.Add(choice);
+            }
+
+            choice.role = role.ToString();
+        }
+
+        public void RemoveSwitch(string key, string parameter)
+        {
+            FindMaterial(key)?.switches.RemoveAll(c => c.parameter == parameter);
         }
 
         public void RemoveTexture(string key, string parameter)

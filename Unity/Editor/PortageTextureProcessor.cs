@@ -263,6 +263,77 @@ namespace Portage
         }
 
         /// <summary>
+        /// Copies one channel of a mask texture into the grayscale <c>&lt;baseName&gt;_Emission.png</c> in the
+        /// texture folder and imports it as a linear texture, because URP Lit reads emission from the RGB of
+        /// its own map. Returns the asset path, or null (with a report entry) on failure. The same source
+        /// yields the same asset within one run.
+        /// </summary>
+        public string BuildEmissionMap(MaskSource source, string baseName)
+        {
+            if (source == null)
+                return null;
+
+            string key = "E:" + source.Key;
+            if (_masksByKey.TryGetValue(key, out string existing))
+                return existing;
+
+            PixelSource pixels = Load(source, baseName);
+            if (pixels == null)
+            {
+                _masksByKey[key] = null;
+                return null;
+            }
+
+            var gray = new Color32[pixels.Pixels.Length];
+            for (int y = 0; y < pixels.Height; y++)
+            {
+                for (int x = 0; x < pixels.Width; x++)
+                {
+                    byte value = Sample(pixels, x, y, pixels.Width, pixels.Height, 0);
+                    gray[y * pixels.Width + x] = new Color32(value, value, value, 255);
+                }
+            }
+
+            // ImportTexture copies exported textures to the same folder under their own file name, so a name
+            // that one of them has is taken as well.
+            string sourceFolder = System.IO.Path.GetDirectoryName(source.Path);
+            string safeName = PortageAssetUtil.SanitizeFileName(baseName);
+            string assetPath = _textureFolder + "/" + safeName + "_Emission.png";
+            int suffix = 2;
+            while (File.Exists(System.IO.Path.Combine(sourceFolder, System.IO.Path.GetFileName(assetPath)))
+                   || (_keyByMaskPath.TryGetValue(assetPath, out string owner) && owner != key))
+                assetPath = _textureFolder + "/" + safeName + "_Emission_" + suffix++ + ".png";
+
+            TextureImporter importer = WriteAndImport(assetPath, gray, pixels.Width, pixels.Height, true, baseName);
+            if (importer == null)
+            {
+                _masksByKey[key] = null;
+                return null;
+            }
+
+            bool dirty = false;
+            if (importer.textureType != TextureImporterType.Default)
+            {
+                importer.textureType = TextureImporterType.Default;
+                dirty = true;
+            }
+
+            if (importer.sRGBTexture)
+            {
+                importer.sRGBTexture = false;
+                dirty = true;
+            }
+
+            if (dirty)
+                importer.SaveAndReimport();
+
+            _masksByKey[key] = assetPath;
+            _keyByMaskPath[assetPath] = key;
+            _report.CreatedTextures.Add(assetPath);
+            return assetPath;
+        }
+
+        /// <summary>
         /// Reads a color mask texture from the export folder (PNG or JPG only). Returns null, with an
         /// error in the report, when it cannot be read.
         /// </summary>

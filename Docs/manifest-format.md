@@ -98,11 +98,17 @@ conversion happen in the Unity FBX import settings.
 | `scalarParameters` | array | `{ "name": string, "value": float }` |
 | `vectorParameters` | array | `{ "name": string, "value": [r, g, b, a] }` |
 | `textureParameters` | array | `{ "name": string, "texture": string }` where `texture` is an `id` in `textures`, or empty if the parameter is unset. |
-| `convertible` | bool | `false` when the material exposes no parameters the importer could map. Such a material also has an entry in `issues`. |
+| `staticSwitchParameters` | array | `{ "name": string, "value": bool }`. Missing in manifests written before static switches were exported; an importer treats that as an empty array. |
+| `convertible` | bool | `false` when the material exposes no scalar, vector or texture parameters the importer could map. Such a material also has an entry in `issues`. |
 
 Parameter lists contain the effective values of the instance: overridden values where the
 instance overrides them, inherited values otherwise. Parameter names are written exactly as they
 appear in Unreal; mapping them to shader properties is configured on the Unity side.
+
+Unreal lists every parameter of the master material, including those behind a static switch that
+is off for this instance. Such a parameter still has a value (usually a default or a placeholder
+texture) that the material does not use. The switch values are the only way for the importer to
+tell; what each switch controls is not recorded and is worked out on the Unity side.
 
 ### textures
 
@@ -191,6 +197,9 @@ Codes defined in version 1:
         { "name": "BaseColor", "texture": "/Game/Props/Crate/T_Crate_D.T_Crate_D" },
         { "name": "Normal", "texture": "/Game/Props/Crate/T_Crate_N.T_Crate_N" },
         { "name": "ORM", "texture": "/Game/Props/Crate/T_Crate_ORM.T_Crate_ORM" }
+      ],
+      "staticSwitchParameters": [
+        { "name": "Use Normal", "value": true }
       ],
       "convertible": true
     }

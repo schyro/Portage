@@ -29,6 +29,32 @@ For each parameter of a material the importer uses the first of:
 Guesses never override an input that a higher-precedence source already assigned: if a table
 rule maps a normal map, no second normal map is guessed.
 
+The same precedence gives every static switch its role. Decisions depend on the names of the
+parameters and switches only, so they are the same for every material of a base material.
+
+## Switches
+
+A role says what a static switch turns on. When a material is built, a switch that has a role
+and is off in that material keeps the inputs it controls out, whichever source mapped them. The
+switch values come from the manifest and are never stored here.
+
+| Role | Controls |
+| --- | --- |
+| `None` | Nothing. A stored `None` also stops the importer from guessing a role. |
+| `BaseColorTexture` | The `BaseColor` texture. Off: a vector with `constant` set is the base color instead. |
+| `MetallicTexture` | `Metallic` mask channels. Off: the scalar mapped to `_Metallic` applies. |
+| `RoughnessTexture` | `Roughness` and `Smoothness` mask channels. Off: the scalar mapped to `_Smoothness` applies. |
+| `NormalTexture` | The `Normal` texture. |
+| `Occlusion` | `Occlusion` mask channels. On does not apply occlusion without `applyOcclusion`. |
+| `ColorMask` | The `ColorMask` texture. |
+| `Emission` | Everything emissive: `Emission` textures and mask channels, `_EmissionColor` and `_EmissionIntensity`. |
+| `EmissionTexture` | `Emission` textures and mask channels, but not the emission color. |
+| `SeparateEmissionTexture` | On: the `Emission` texture is used and `Emission` mask channels are not. Off: the other way round. |
+
+A role belongs to at most one switch of a base material. Some guesses are only made when a
+switch has the matching role: a constant needs the switch that chooses between it and a texture,
+and anything emissive needs a switch with the `Emission` role.
+
 ## Root object
 
 | Field | Type | Description |
@@ -45,6 +71,7 @@ rule maps a normal map, no second normal map is guessed.
 | `textures` | array | Choices for texture parameters. |
 | `scalars` | array | Choices for scalar parameters. |
 | `vectors` | array | Choices for vector parameters. |
+| `switches` | array | Roles of static switch parameters. Missing in files written before switches were supported. |
 
 A parameter that is not listed has no stored choice and falls through to the table and the
 guess.
@@ -55,14 +82,14 @@ guess.
 | --- | --- | --- |
 | `parameter` | string | Unreal parameter name, exactly as in the manifest. |
 | `usage` | string | `BaseColor`, `Normal`, `Emission`, `Mask`, `Ignore` or `ColorMask`. `ColorMask` limits the base color tint to the white areas of the texture; only its red channel is read. |
-| `red`, `green`, `blue`, `alpha` | string | Content of each channel when `usage` is `Mask`: `None`, `Metallic`, `Roughness`, `Smoothness` or `Occlusion`. |
+| `red`, `green`, `blue`, `alpha` | string | Content of each channel when `usage` is `Mask`: `None`, `Metallic`, `Roughness`, `Smoothness`, `Occlusion` or `Emission`. An `Emission` channel is copied into a grayscale emission map. |
 
 ### scalars
 
 | Field | Type | Description |
 | --- | --- | --- |
 | `parameter` | string | Unreal parameter name. |
-| `property` | string | Float property of the target shader, for example `_BumpScale`. Empty means ignore. |
+| `property` | string | Float property of the target shader, for example `_BumpScale`. Empty means ignore. `_EmissionIntensity` is not a shader property: its value multiplies `_EmissionColor`. |
 | `conversion` | string | `None` or `OneMinus`. |
 
 ### vectors
@@ -71,6 +98,14 @@ guess.
 | --- | --- | --- |
 | `parameter` | string | Unreal parameter name. |
 | `property` | string | Color property of the target shader, for example `_BaseColor`. Empty means ignore. |
+| `constant` | bool | Only for `_BaseColor`: the value replaces the base color texture and is used when the material has none, for example a base color constant behind a switch. It then also replaces a tint mapped to `_BaseColor`; with a texture it is ignored. `false` when missing. |
+
+### switches
+
+| Field | Type | Description |
+| --- | --- | --- |
+| `parameter` | string | Unreal static switch parameter name. |
+| `role` | string | One of the roles under [Switches](#switches). |
 
 ## Example
 
@@ -90,7 +125,12 @@ guess.
         { "parameter": "Normal Strength", "property": "_BumpScale", "conversion": "None" }
       ],
       "vectors": [
-        { "parameter": "Base Color Multiplier", "property": "_BaseColor" }
+        { "parameter": "Base Color Multiplier", "property": "_BaseColor", "constant": false },
+        { "parameter": "Base Color Constant", "property": "_BaseColor", "constant": true }
+      ],
+      "switches": [
+        { "parameter": "Base Color Texture Input", "role": "BaseColorTexture" },
+        { "parameter": "Use Dust", "role": "None" }
       ]
     }
   ]

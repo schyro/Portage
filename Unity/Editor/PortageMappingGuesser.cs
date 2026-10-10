@@ -24,6 +24,7 @@ namespace Portage
         };
 
         static readonly string[] TrailingWords = { "texture", "tex", "map" };
+        static readonly string[] ConstantWords = { "constant" };
 
         static readonly HashSet<string> BaseColorNames = new HashSet<string>
         {
@@ -55,6 +56,21 @@ namespace Portage
             "basecolormultiplier", "basecolortint", "tint", "colortint", "basecolor", "color", "albedotint",
         };
 
+        static readonly HashSet<string> EmissionNames = new HashSet<string>
+        {
+            "emissive", "emission", "emissivecolor", "emissioncolor", "emissivecolour", "emissioncolour",
+        };
+
+        // What follows "emissive" or "emission" in the name of a scalar that scales the emission.
+        static readonly string[] EmissionIntensityWords =
+        {
+            "intensity", "intencity", "strength", "power", "multiplier", "brightness", "boost", "scale",
+        };
+
+        static readonly string[] SwitchPrefixes = { "use", "enable", "has", "with" };
+        static readonly string[] SwitchSuffixes = { "input", "enabled", "switch", "toggle" };
+        static readonly string[] SeparateWords = { "separate", "seperate", "unique" };
+
         public sealed class TextureGuess
         {
             public string Parameter = "";
@@ -73,6 +89,15 @@ namespace Portage
         {
             public string Parameter = "";
             public string Property = "";
+
+            /// <summary>The value replaces the texture of the input and is only used when the material has none.</summary>
+            public bool Constant;
+        }
+
+        public sealed class SwitchGuess
+        {
+            public string Parameter = "";
+            public SwitchRole Role;
         }
 
         public sealed class Result
@@ -124,22 +149,89 @@ namespace Portage
             return false;
         }
 
+        /// <summary>
+        /// Guesses what a static switch turns on, from its name: <c>Use Normal</c>, <c>Metallic Texture Input</c>,
+        /// <c>Use Emissive</c>. A switch for base color, metallic or roughness must name the texture, because
+        /// without it the name does not say what the switch chooses between.
+        /// </summary>
+        public static SwitchRole GuessSwitchRole(string name)
+        {
+            string s = Flatten(name);
+            s = StripStart(s, SwitchPrefixes, out _);
+            s = StripEnd(s, SwitchSuffixes, out _);
+            s = StripEnd(s, TrailingWords, out bool texture);
+
+            if (ColorMaskNames.Contains(s))
+                return SwitchRole.ColorMask;
+            if (NormalNames.Contains(s))
+                return SwitchRole.NormalTexture;
+            if (OcclusionNames.Contains(s))
+                return SwitchRole.Occlusion;
+            if (EmissionNames.Contains(s))
+                return texture ? SwitchRole.EmissionTexture : SwitchRole.Emission;
+            if (!texture)
+                return SwitchRole.None;
+
+            // "color" alone is too vague for a switch.
+            if (s != "color" && BaseColorNames.Contains(s))
+                return SwitchRole.BaseColorTexture;
+            if (MetallicNames.Contains(s))
+                return SwitchRole.MetallicTexture;
+            if (RoughnessNames.Contains(s) || SmoothnessNames.Contains(s))
+                return SwitchRole.RoughnessTexture;
+            if (EmissionNames.Contains(StripStart(s, SeparateWords, out bool separate)) && separate)
+                return SwitchRole.SeparateEmissionTexture;
+            return SwitchRole.None;
+        }
+
+        /// <summary>
+        /// Guesses the roles of the static switches of a material. Every role is given to at most one switch,
+        /// the first in manifest order.
+        /// </summary>
+        /// <param name="excludedParameters">Switch names that already have a decision; they are not considered.</param>
+        /// <param name="takenRoles">Roles a decision already assigned; they are not guessed again.</param>
+        public static List<SwitchGuess> GuessSwitches(PortageManifest.MaterialEntry entry,
+            ISet<string> excludedParameters = null, ISet<SwitchRole> takenRoles = null)
+        {
+            var guesses = new List<SwitchGuess>();
+            var taken = takenRoles != null ? new HashSet<SwitchRole>(takenRoles) : new HashSet<SwitchRole>();
+            foreach (PortageManifest.StaticSwitchParameter parameter in entry.staticSwitchParameters)
+            {
+                if (excludedParameters != null && excludedParameters.Contains(parameter.name))
+                    continue;
+
+                SwitchRole role = GuessSwitchRole(parameter.name);
+                if (role != SwitchRole.None && taken.Add(role))
+                    guesses.Add(new SwitchGuess { Parameter = parameter.name, Role = role });
+            }
+
+            return guesses;
+        }
+
         /// <param name="excludedTextureParameters">
         /// Texture parameter names that already have a decision; they are not considered.
         /// </param>
+        /// <param name="switchRoles">
+        /// Roles of the static switches of the material. Some guesses are only made for a material that has a
+        /// switch for them: emission needs <see cref="SwitchRole.Emission"/>, and a constant needs the switch
+        /// that chooses between it and a texture. Null or empty for a material without such switches.
+        /// </param>
         public static Result Guess(PortageManifest.MaterialEntry entry, PortageManifest manifest,
-            ISet<string> excludedTextureParameters = null)
+            ISet<string> excludedTextureParameters = null, ISet<SwitchRole> switchRoles = null)
         {
             var result = new Result();
-            GuessTextures(entry, manifest, excludedTextureParameters, result);
-            GuessScalars(entry, result);
-            GuessVectors(entry, result);
+            GuessTextures(entry, manifest, excludedTextureParameters, switchRoles, result);
+            GuessScalars(entry, switchRoles, result);
+            GuessVectors(entry, switchRoles, result);
             return result;
         }
 
+        static bool Has(ISet<SwitchRole> roles, SwitchRole role) => roles != null && roles.Contains(role);
+
         static void GuessTextures(PortageManifest.MaterialEntry entry, PortageManifest manifest,
-            ISet<string> excluded, Result result)
+            ISet<string> excluded, ISet<SwitchRole> roles, Result result)
         {
+            bool emission = Has(roles, SwitchRole.Emission);
             var candidates = new List<Candidate>();
             bool colorMaskFound = false;
             foreach (PortageManifest.TextureParameter parameter in entry.textureParameters)
@@ -199,11 +291,26 @@ namespace Portage
                 result.Textures.Add(new TextureGuess { Parameter = normal.Parameter.name, Usage = TextureUsage.Normal });
             }
 
+            // Only a material with an emission switch gets an emission map guessed. A parameter that is not
+            // in use holds a placeholder, which is not a candidate.
+            if (emission)
+            {
+                foreach (Candidate c in candidates)
+                {
+                    if (used.Contains(c) || !IsEmissionName(c.Norm))
+                        continue;
+
+                    used.Add(c);
+                    result.Textures.Add(new TextureGuess { Parameter = c.Parameter.name, Usage = TextureUsage.Emission });
+                    break;
+                }
+            }
+
             // At most one packed mask per material: the first parameter, in manifest order, with a layout.
             bool metallic = false, smoothness = false, occlusion = false;
             foreach (Candidate c in candidates)
             {
-                if (used.Contains(c) || !TryGetPackedLayout(c, out MaskChannel[] channels))
+                if (used.Contains(c) || !TryGetPackedLayout(c, emission, out MaskChannel[] channels))
                     continue;
 
                 used.Add(c);
@@ -290,14 +397,21 @@ namespace Portage
             };
         }
 
-        static bool TryGetPackedLayout(Candidate c, out MaskChannel[] channels)
+        static bool IsEmissionName(string norm)
         {
-            if (TryParenthesisedLayout(c.Parameter.name, out channels))
+            return EmissionNames.Contains(norm) || norm.EndsWith("emissive", StringComparison.Ordinal) ||
+                   norm.EndsWith("emission", StringComparison.Ordinal);
+        }
+
+        // An emissive channel is only part of the layout when emission is guessed for the material.
+        static bool TryGetPackedLayout(Candidate c, bool emission, out MaskChannel[] channels)
+        {
+            if (TryParenthesisedLayout(c.Parameter.name, emission, out channels))
                 return true;
 
             foreach (string token in Tokens(c.Parameter.name))
             {
-                if (TryPackedToken(token, out channels))
+                if (TryPackedToken(token, emission, out channels))
                     return true;
             }
 
@@ -307,7 +421,7 @@ namespace Portage
             {
                 if (IsAllDigits(textureTokens[i]))
                     continue;
-                return TryPackedToken(textureTokens[i], out channels);
+                return TryPackedToken(textureTokens[i], emission, out channels);
             }
 
             channels = null;
@@ -315,7 +429,7 @@ namespace Portage
         }
 
         // Layout written into the parameter name, for example ORMA(AO,Rough,Mat,Emis).
-        static bool TryParenthesisedLayout(string parameterName, out MaskChannel[] channels)
+        static bool TryParenthesisedLayout(string parameterName, bool emission, out MaskChannel[] channels)
         {
             channels = null;
             int open = parameterName.IndexOf('(');
@@ -329,7 +443,13 @@ namespace Portage
             for (int i = 0; i < items.Length && i < 4; i++)
             {
                 found[i] = ClassifyItem(Flatten(items[i]));
-                if (found[i] != MaskChannel.None)
+                if (found[i] == MaskChannel.Emission)
+                {
+                    // Does not count as recognised: an emissive channel alone does not make a packed mask.
+                    if (!emission)
+                        found[i] = MaskChannel.None;
+                }
+                else if (found[i] != MaskChannel.None)
                     recognised++;
             }
 
@@ -351,12 +471,14 @@ namespace Portage
                 return MaskChannel.Metallic;
             if (item.StartsWith("smooth", StringComparison.Ordinal) || item.StartsWith("gloss", StringComparison.Ordinal))
                 return MaskChannel.Smoothness;
+            if (item.StartsWith("emis", StringComparison.Ordinal) || item.StartsWith("glow", StringComparison.Ordinal))
+                return MaskChannel.Emission;
             return MaskChannel.None;
         }
 
         // An uppercase token such as ORM, ORMA, ORME, ARM, RMA or MRAO. Only uppercase tokens count, so
         // words like Mesh or Master are not read as layouts.
-        static bool TryPackedToken(string token, out MaskChannel[] channels)
+        static bool TryPackedToken(string token, bool emission, out MaskChannel[] channels)
         {
             channels = null;
             if (token.Length < 2 || token.Length > 5)
@@ -395,6 +517,7 @@ namespace Portage
                     case 'M': found[i] = MaskChannel.Metallic; break;
                     case 'S': found[i] = MaskChannel.Smoothness; break;
                     case 'A': found[i] = hasO ? MaskChannel.None : MaskChannel.Occlusion; break;
+                    case 'E': found[i] = emission ? MaskChannel.Emission : MaskChannel.None; break;
                 }
             }
 
@@ -402,26 +525,38 @@ namespace Portage
             return true;
         }
 
-        static void GuessScalars(PortageManifest.MaterialEntry entry, Result result)
+        static void GuessScalars(PortageManifest.MaterialEntry entry, ISet<SwitchRole> roles, Result result)
         {
             var taken = new HashSet<string>();
             foreach (PortageManifest.ScalarParameter parameter in entry.scalarParameters)
             {
-                string norm = NormalizeName(parameter.name);
+                // A constant is what the material uses instead of a texture. It is only guessed when a switch
+                // chooses between the two, so the importer knows which one is in effect.
+                string norm = StripEnd(NormalizeName(parameter.name), ConstantWords, out bool constant);
                 if (norm.Contains("constant"))
                     continue;
 
                 string property = null;
                 var conversion = ScalarConversion.None;
                 if (MetallicScalarNames.Contains(norm))
-                    property = "_Metallic";
+                {
+                    if (!constant || Has(roles, SwitchRole.MetallicTexture))
+                        property = "_Metallic";
+                }
                 else if (RoughnessScalarNames.Contains(norm))
                 {
-                    property = "_Smoothness";
-                    conversion = ScalarConversion.OneMinus;
+                    if (!constant || Has(roles, SwitchRole.RoughnessTexture))
+                    {
+                        property = "_Smoothness";
+                        conversion = ScalarConversion.OneMinus;
+                    }
                 }
+                else if (constant)
+                    continue;
                 else if (BumpScaleNames.Contains(norm))
                     property = "_BumpScale";
+                else if (Has(roles, SwitchRole.Emission) && IsEmissionIntensity(norm))
+                    property = PortageMappingTable.EmissionIntensityProperty;
 
                 if (property == null || !taken.Add(property))
                     continue;
@@ -430,18 +565,80 @@ namespace Portage
             }
         }
 
-        static void GuessVectors(PortageManifest.MaterialEntry entry, Result result)
+        static bool IsEmissionIntensity(string norm)
         {
-            bool taken = false;
+            foreach (string prefix in new[] { "emissive", "emission" })
+            {
+                if (norm.StartsWith(prefix, StringComparison.Ordinal) &&
+                    Array.IndexOf(EmissionIntensityWords, norm.Substring(prefix.Length)) >= 0)
+                    return true;
+            }
+
+            return false;
+        }
+
+        static void GuessVectors(PortageManifest.MaterialEntry entry, ISet<SwitchRole> roles, Result result)
+        {
+            bool tintTaken = false, constantTaken = false, emissionTaken = false;
             foreach (PortageManifest.VectorParameter parameter in entry.vectorParameters)
             {
-                string norm = NormalizeName(parameter.name);
-                if (taken || norm.Contains("constant") || !BaseColorVectorNames.Contains(norm))
+                string norm = StripEnd(NormalizeName(parameter.name), ConstantWords, out bool constant);
+                if (norm.Contains("constant"))
                     continue;
 
-                taken = true;
-                result.Vectors.Add(new VectorGuess { Parameter = parameter.name, Property = "_BaseColor" });
+                if (EmissionNames.Contains(norm))
+                {
+                    if (emissionTaken || !Has(roles, SwitchRole.Emission))
+                        continue;
+
+                    emissionTaken = true;
+                    result.Vectors.Add(new VectorGuess { Parameter = parameter.name, Property = "_EmissionColor" });
+                }
+                else if (constant)
+                {
+                    if (constantTaken || !Has(roles, SwitchRole.BaseColorTexture) || !BaseColorNames.Contains(norm))
+                        continue;
+
+                    constantTaken = true;
+                    result.Vectors.Add(new VectorGuess { Parameter = parameter.name, Property = "_BaseColor", Constant = true });
+                }
+                else if (!tintTaken && BaseColorVectorNames.Contains(norm))
+                {
+                    tintTaken = true;
+                    result.Vectors.Add(new VectorGuess { Parameter = parameter.name, Property = "_BaseColor" });
+                }
             }
+        }
+
+        // Removes the first of the words the name starts with, unless nothing would be left.
+        static string StripStart(string s, string[] words, out bool stripped)
+        {
+            foreach (string word in words)
+            {
+                if (s.Length > word.Length && s.StartsWith(word, StringComparison.Ordinal))
+                {
+                    stripped = true;
+                    return s.Substring(word.Length);
+                }
+            }
+
+            stripped = false;
+            return s;
+        }
+
+        static string StripEnd(string s, string[] words, out bool stripped)
+        {
+            foreach (string word in words)
+            {
+                if (s.Length > word.Length && s.EndsWith(word, StringComparison.Ordinal))
+                {
+                    stripped = true;
+                    return s.Substring(0, s.Length - word.Length);
+                }
+            }
+
+            stripped = false;
+            return s;
         }
 
         static string Flatten(string name)
